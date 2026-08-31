@@ -41,7 +41,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
     const sourceNode = nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
-        return buildComposerGenerationContext(inputs, prompt);
+        return buildComposerGenerationContext(inputs, prompt, sourceNode.metadata.referenceNodeIds || (sourceNode.metadata.referenceNodeId ? [sourceNode.metadata.referenceNodeId] : []));
     }
 
     const resourceInputs = flattenGenerationInputs(inputs);
@@ -65,7 +65,7 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     };
 }
 
-function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
+function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, referenceNodeIds: string[] = []): NodeGenerationContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
     const selectedInputs: NodeGenerationResourceInput[] = [];
     const labelByNodeId = new Map<string, string>();
@@ -98,6 +98,16 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
 
     nextPrompt += prompt.slice(lastIndex);
     if (textBlocks.length) nextPrompt = `${nextPrompt.trim()}\n\n${textBlocks.join("\n\n")}`;
+    if (referenceNodeIds.length && !selectedInputs.some((input) => input.type === "image")) {
+        referenceNodeIds
+            .map((nodeId) => inputByNodeId.get(nodeId))
+            .filter((input): input is NodeGenerationInput => Boolean(input))
+            .flatMap((input) => (input.type === "group" ? input.children : [input]))
+            .filter((input) => input.type === "image")
+            .forEach((input) => {
+                if (!selectedInputs.some((selected) => selected.nodeId === input.nodeId)) selectedInputs.push(input);
+            });
+    }
     const referenceImages = selectedInputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image));
     const referenceVideos = selectedInputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video));
     const referenceAudios = selectedInputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio));

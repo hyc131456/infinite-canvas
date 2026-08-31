@@ -1,9 +1,11 @@
 import { type ReactNode, useState } from "react";
-import { ConfigProvider, Switch } from "antd";
+import { ConfigProvider, Input, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { findComfyUiWorkflow, isComfyUiModelValue, useComfyUiStore } from "@/stores/use-comfyui-store";
+import type { ComfyUiParamValue, ComfyUiParameter } from "@/types/comfyui";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const qualityOptions = [
@@ -35,7 +37,8 @@ export const imageAspectOptions = aspectOptions.map((item) => ({ value: item.siz
 
 type ImageSettingsPanelProps = {
     config: AiConfig;
-    onConfigChange: (key: "quality" | "size" | "count" | "background", value: string) => void;
+    model?: string;
+    onConfigChange: (key: ImageSettingKey, value: AiConfig[ImageSettingKey]) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -43,15 +46,21 @@ type ImageSettingsPanelProps = {
     quickCount?: number;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
+export type ImageSettingKey = "quality" | "size" | "count" | "background" | "negativePrompt" | "comfyUiParams";
+
+export function ImageSettingsPanel({ config, model, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", maxCount = 15, quickCount = 10 }: ImageSettingsPanelProps) {
     const { t } = useTranslation();
     const [snapDimensionToStep, setSnapDimensionToStep] = useState(true);
     const quality = config.quality || "auto";
     const count = Math.max(1, Math.min(maxCount, Math.floor(Math.abs(Number(config.count)) || 1)));
     const activeSize = config.size || "auto";
+    const comfyUiServices = useComfyUiStore((state) => state.services);
     const transparentBackground = config.background === "transparent";
     const selectedAspect = aspectOptions.find((item) => (item.size || item.value) === activeSize || item.value === activeSize);
     const dimensions = readSizeDimensions(activeSize, selectedAspect || aspectOptions[0]);
+    const activeModel = model || config.model || config.imageModel;
+    const workflow = isComfyUiModelValue(activeModel) ? findComfyUiWorkflow(comfyUiServices, activeModel)?.workflow : null;
+    const workflowValues = workflow ? config.comfyUiParams?.[activeModel] || {} : {};
     const selectAspect = (value: string) => {
         const option = aspectOptions.find((item) => item.value === value);
         onConfigChange("size", option?.size || option?.value || "auto");
@@ -143,6 +152,23 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <CountInput value={count} max={maxCount} theme={theme} onChange={(value) => onConfigChange("count", String(value || 1))} />
                     </div>
                 </div>
+                <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                        <SettingTitle color={theme.node.muted}>{t("settingsPanels.image.negativePrompt")}</SettingTitle>
+                        <span className="text-[11px]" style={{ color: theme.node.muted }}>
+                            {t("settingsPanels.image.negativePromptHint")}
+                        </span>
+                    </div>
+                    <Input.TextArea
+                        value={config.negativePrompt}
+                        rows={3}
+                        placeholder={t("settingsPanels.image.negativePromptPlaceholder")}
+                        onChange={(event) => onConfigChange("negativePrompt", event.target.value)}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        style={{ background: "transparent", borderColor: theme.node.stroke, color: theme.node.text }}
+                    />
+                </div>
+                {workflow ? <ComfyUiParameterFields workflowParameters={workflow.parameters} values={workflowValues} onChange={(key, value) => onConfigChange("comfyUiParams", { ...config.comfyUiParams, [activeModel]: { ...workflowValues, [key]: value } })} /> : null}
             </div>
         </ImageSettingsTheme>
     );
@@ -159,6 +185,32 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
             {children}
         </ConfigProvider>
     );
+}
+
+function ComfyUiParameterFields({ workflowParameters, values, onChange }: { workflowParameters: ComfyUiParameter[]; values: Record<string, ComfyUiParamValue>; onChange: (key: string, value: ComfyUiParamValue) => void }) {
+    const { t } = useTranslation();
+    const parameters = workflowParameters.filter((parameter) => !["prompt", "negativePrompt", "width", "height", "batchSize"].includes(parameter.key));
+    if (!parameters.length) return null;
+    return (
+        <div className="space-y-2.5 border-t pt-3" style={{ borderColor: "currentColor", borderOpacity: 0.12 }}>
+            <SettingTitle color="currentColor">{t("settingsPanels.image.workflowParameters")}</SettingTitle>
+            <div className="space-y-2.5">
+                {parameters.map((parameter) => (
+                    <label key={parameter.key} className="block space-y-1">
+                        <span className="block text-xs opacity-70">{parameter.label}{parameter.required ? " *" : ""}</span>
+                        <ComfyUiParameterInput parameter={parameter} value={values[parameter.key] ?? parameter.defaultValue} onChange={(value) => onChange(parameter.key, value)} />
+                    </label>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function ComfyUiParameterInput({ parameter, value, onChange }: { parameter: ComfyUiParameter; value: ComfyUiParamValue | undefined; onChange: (value: ComfyUiParamValue) => void }) {
+    if (parameter.type === "textarea") return <Input.TextArea rows={3} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} onMouseDown={(event) => event.stopPropagation()} />;
+    if (parameter.type === "boolean") return <Switch size="small" checked={Boolean(value)} onChange={onChange} />;
+    if (parameter.type === "select") return <Select className="w-full" value={value as string | number | undefined} options={parameter.options?.map((option) => ({ value: option.value, label: option.label }))} onChange={onChange} />;
+    return <Input type={parameter.type === "number" || parameter.type === "seed" ? "number" : "text"} min={parameter.min} max={parameter.max} step={parameter.step} value={value as string | number | undefined} onChange={(event) => onChange(parameter.type === "number" || parameter.type === "seed" ? Number(event.target.value) : event.target.value)} onMouseDown={(event) => event.stopPropagation()} />;
 }
 
 export function imageQualityLabel(value: string) {

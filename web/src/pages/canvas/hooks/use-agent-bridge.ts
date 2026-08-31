@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
 import i18n from "@/i18n";
 import { useAgentStore } from "@/stores/use-agent-store";
@@ -7,6 +7,8 @@ import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-p
 import type { CanvasConnection, CanvasNodeData, ContextMenuState, ViewportTransform } from "@/types/canvas";
 
 type GenerateNodeRef = MutableRefObject<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>;
+
+const CANVAS_GENERATION_CONCURRENCY = 3;
 
 type AgentBridgeParams = {
     projectId: string;
@@ -37,9 +39,32 @@ export function useAgentBridge(params: AgentBridgeParams) {
         params;
     const setAgentCanvasContext = useAgentStore((state) => state.setCanvasContext);
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
+    const generationQueueRef = useRef<Array<Extract<CanvasAgentOp, { type: "run_generation" }>>>([]);
+    const activeGenerationCountRef = useRef(0);
     const projectTitle = title || i18n.t("canvas.project.untitled");
 
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(() => ({ projectId, title: projectTitle, nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }), [connections, projectTitle, nodes, projectId, selectedNodeIds, viewport]);
+    const drainGenerationQueue = useCallback(() => {
+        while (activeGenerationCountRef.current < CANVAS_GENERATION_CONCURRENCY && generationQueueRef.current.length) {
+            const operation = generationQueueRef.current.shift();
+            const generateNode = generateNodeRef.current;
+            if (!operation) continue;
+            if (!generateNode) {
+                generationQueueRef.current.unshift(operation);
+                break;
+            }
+            const target = nodesRef.current.find((node) => node.id === operation.nodeId);
+            const prompt = operation.prompt?.trim() ? operation.prompt : (target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
+            activeGenerationCountRef.current += 1;
+            void generateNode(operation.nodeId, operation.mode || target?.metadata?.generationMode || "image", prompt)
+                .catch(() => undefined)
+                .finally(() => {
+                    activeGenerationCountRef.current -= 1;
+                    drainGenerationQueue();
+                });
+        }
+    }, [generateNodeRef, nodesRef]);
+
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
@@ -61,17 +86,12 @@ export function useAgentBridge(params: AgentBridgeParams) {
             setViewport(next.viewport);
             setContextMenu(null);
             if (generationOps.length) {
-                queueMicrotask(() =>
-                    generationOps.forEach((op) => {
-                        const target = nodesRef.current.find((node) => node.id === op.nodeId);
-                        const prompt = op.prompt?.trim() ? op.prompt : (target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "");
-                        void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || "image", prompt);
-                    }),
-                );
+                generationQueueRef.current.push(...generationOps);
+                queueMicrotask(drainGenerationQueue);
             }
             return { ...next, projectId, title: projectTitle };
         },
-        [projectTitle, projectId],
+        [drainGenerationQueue, projectTitle, projectId],
     );
     const undoAgentOps = useCallback(() => {
         if (!agentUndoSnapshot) return null;

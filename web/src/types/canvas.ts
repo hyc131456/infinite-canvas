@@ -1,3 +1,5 @@
+import type { ComfyUiParamValue } from "@/types/comfyui";
+
 export type Position = {
     x: number;
     y: number;
@@ -57,6 +59,8 @@ export type CanvasNodeMetadata = {
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;
     quality?: string;
+    negativePrompt?: string;
+    comfyUiParams?: Record<string, ComfyUiParamValue>;
     background?: string;
     count?: number;
     textCount?: number;
@@ -64,6 +68,7 @@ export type CanvasNodeMetadata = {
     primaryTextId?: string;
     seconds?: string;
     vquality?: string;
+    megapixels?: string;
     generateAudio?: string;
     watermark?: string;
     audioVoice?: string;
@@ -71,6 +76,8 @@ export type CanvasNodeMetadata = {
     audioSpeed?: string;
     audioInstructions?: string;
     references?: string[];
+    referenceNodeId?: string;
+    referenceNodeIds?: string[];
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;

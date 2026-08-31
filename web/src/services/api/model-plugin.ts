@@ -2,6 +2,8 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import i18n from "@/i18n";
 import { buildApiUrl, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { getComfyUiMinimaxH3Script } from "./comfyui-minimax-h3-template";
+import { getComfyUiZImageScript } from "./comfyui-z-image-template";
 
 type RequestOptions = { signal?: AbortSignal };
 
@@ -169,6 +171,9 @@ export function getPluginVariables(): PluginVariable[] {
         { name: "images", type: "string[]", desc: i18n.t("modelPlugin.variables.images"), capabilities: ["image", "video"] },
         { name: "messages", type: "{ role, content }[]", desc: i18n.t("modelPlugin.variables.messages"), capabilities: ["text"] },
         { name: "params", type: "object", desc: i18n.t("modelPlugin.variables.params") },
+        { name: "params.negativePrompt", type: "string", desc: i18n.t("modelPlugin.variables.negativePrompt"), capabilities: ["image"] },
+        { name: "params.width", type: "number", desc: i18n.t("modelPlugin.variables.imageWidth"), capabilities: ["image"] },
+        { name: "params.height", type: "number", desc: i18n.t("modelPlugin.variables.imageHeight"), capabilities: ["image"] },
         { name: "model", type: "string", desc: i18n.t("modelPlugin.variables.model") },
         { name: "baseUrl", type: "string", desc: i18n.t("modelPlugin.variables.baseUrl") },
         { name: "apiKey", type: "string", desc: i18n.t("modelPlugin.variables.apiKey") },
@@ -192,6 +197,10 @@ export type PluginTemplate = { label: string; script: string };
 export function getPluginTemplates(): Record<ModelCapability, PluginTemplate[]> {
     return {
     image: [
+        {
+            label: "ComfyUI Z-Image",
+            script: getComfyUiZImageScript(),
+        },
         {
             label: i18n.t("modelPlugin.templates.openai"),
             script: `// ${i18n.t("modelPlugin.templates.imageOpenai")}
@@ -247,6 +256,10 @@ return (data.candidates || [])
         },
     ],
     video: [
+        {
+            label: i18n.t("modelPlugin.templates.comfyuiMinimaxH3"),
+            script: getComfyUiMinimaxH3Script(),
+        },
         {
             label: i18n.t("modelPlugin.templates.openai"),
             script: `// ${i18n.t("modelPlugin.templates.videoOpenai")}

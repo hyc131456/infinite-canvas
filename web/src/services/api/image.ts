@@ -8,6 +8,8 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
+import { isComfyUiModelValue } from "@/stores/use-comfyui-store";
+import { runComfyUiImageWorkflow } from "@/services/comfyui/client";
 
 const apiText = (key: string, options?: Record<string, unknown>) => i18n.t(`apiErrors.${key}`, options);
 
@@ -714,13 +716,24 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const model = config.model || config.imageModel;
+    if (isComfyUiModelValue(model)) {
+        const requestSize = resolveRequestSize(normalizeQuality(config.quality), config.size);
+        const size = requestSize ? parseImageDimensions(requestSize) : null;
+        return runComfyUiImageWorkflow(model, prompt, {
+            ...(config.comfyUiParams?.[model] || {}),
+            negativePrompt: config.negativePrompt,
+            ...(size ? { width: size.width, height: size.height } : {}),
+        }, options);
+    }
+    const requestConfig = resolveModelRequestConfig(config, model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {
         const quality = normalizeQuality(config.quality);
         const requestSize = resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
+        const dimensions = requestSize ? parseImageDimensions(requestSize) : null;
         try {
             const result = await runModelPlugin({
                 capability: "image",
@@ -728,7 +741,14 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, prompt),
                 images: [],
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: {
+                    size: requestSize,
+                    ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
+                    quality,
+                    count: n,
+                    negativePrompt: config.negativePrompt,
+                    ...(background ? { background } : {}),
+                },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -773,7 +793,9 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const model = config.model || config.imageModel;
+    if (isComfyUiModelValue(model)) throw new Error("当前 ComfyUI 工作流暂不支持参考图编辑，请先使用文生图");
+    const requestConfig = resolveModelRequestConfig(config, model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const requestPrompt = buildImageReferencePromptText(prompt, references);
     const script = resolveModelScript(config, config.model || config.imageModel);
@@ -782,6 +804,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         const requestSize = resolveRequestSize(quality, config.size);
         const background = normalizeBackground(config.background);
         const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
+        const dimensions = requestSize ? parseImageDimensions(requestSize) : null;
         try {
             const result = await runModelPlugin({
                 capability: "image",
@@ -789,7 +812,14 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
                 config: requestConfig,
                 prompt: withSystemPrompt(requestConfig, requestPrompt),
                 images: refs,
-                params: { size: requestSize, quality, count: n, ...(background ? { background } : {}) },
+                params: {
+                    size: requestSize,
+                    ...(dimensions ? { width: dimensions.width, height: dimensions.height } : {}),
+                    quality,
+                    count: n,
+                    negativePrompt: config.negativePrompt,
+                    ...(background ? { background } : {}),
+                },
                 signal: options?.signal,
             });
             return normalizePluginImages(result).map((dataUrl) => ({ id: nanoid(), dataUrl }));

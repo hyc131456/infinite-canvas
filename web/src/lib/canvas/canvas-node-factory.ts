@@ -46,6 +46,8 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         model: config.model,
         size: config.size,
         quality: config.quality,
+        negativePrompt: config.negativePrompt,
+        comfyUiParams: config.comfyUiParams?.[config.model],
         ...(config.background ? { background: config.background } : {}),
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),

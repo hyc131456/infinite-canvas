@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>无限画布 - 本地 ComfyUI 配置原型</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #050505;
+      --panel: #0a0a0a;
+      --elevated: #161616;
+      --field: #101010;
+      --hover: rgba(250,250,249,.08);
+      --selected: rgba(250,250,249,.12);
+      --text: #fafaf9;
+      --muted: #a8a29e;
+      --faint: #78716c;
+      --line: #292524;
+      --line-strong: #44403c;
+      --primary: #fafafa;
+      --primary-text: #171717;
+      --success: #86efac;
+      --success-bg: rgba(34,197,94,.12);
+      --danger: #f87171;
+      --danger-bg: rgba(239,68,68,.10);
+      --info: #93c5fd;
+      --info-bg: rgba(59,130,246,.11);
+      --warn: #facc15;
+      --warn-bg: rgba(234,179,8,.11);
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg: #ffffff;
+      --panel: #ffffff;
+      --elevated: #ffffff;
+      --field: #ffffff;
+      --hover: rgba(23,23,23,.06);
+      --selected: rgba(23,23,23,.10);
+      --text: #171717;
+      --muted: #78716c;
+      --faint: #a8a29e;
+      --line: #e7e5e4;
+      --line-strong: #d6d3d1;
+      --primary: #171717;
+      --primary-text: #ffffff;
+      --success: #15803d;
+      --success-bg: #f0fdf4;
+      --danger: #dc2626;
+      --danger-bg: #fef2f2;
+      --info: #2563eb;
+      --info-bg: #eff6ff;
+      --warn: #a16207;
+      --warn-bg: #fefce8;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 820px; min-height: 100%; background: var(--bg); color: var(--text); }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .6; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+    .app-header { display: flex; align-items: center; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--bg); }
+    .brand { display: flex; align-items: center; gap: 9px; min-width: 112px; color: var(--text); font-weight: 700; }
+    .brand-mark { font-size: 18px; line-height: 1; }
+    .brand-name { letter-spacing: .02em; }
+    .top-nav { display: flex; align-items: center; height: 100%; gap: 3px; margin-left: 26px; }
+    .top-nav button, .header-action { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); white-space: nowrap; }
+    .top-nav button:hover, .header-action:hover { background: var(--hover); color: var(--text); }
+    .top-nav button.active { color: var(--text); }
+    .top-nav button.active::after { position: absolute; bottom: -12px; height: 1px; background: var(--text); }
+    .top-nav .nav-icon, .header-action .nav-icon { font-size: 14px; }
+    .header-spacer { flex: 1; }
+    .header-tools { display: flex; align-items: center; gap: 3px; }
+    .agent-status { display: inline-flex; align-items: center; gap: 6px; margin-right: 7px; padding: 6px 9px; border-radius: 6px; background: var(--selected); color: var(--text); font-size: 11px; }
+    .agent-status .dot { width: 7px; height: 7px; border-radius: 50%; background: #65a30d; }
+    .header-action { padding: 0 8px; font-weight: 600; }
+    .header-action.icon-only { width: 32px; justify-content: center; padding: 0; font-size: 16px; }
+
+    .page { max-width: 1152px; margin: 0 auto; padding: 25px 24px 56px; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 21px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 20px; font-weight: 600; line-height: 1.35; }
+    h2 { font-size: 14px; font-weight: 600; }
+    h3 { font-size: 13px; font-weight: 600; }
+    .page-description { margin-top: 7px; color: var(--muted); font-size: 13px; }
+    .page-actions { display: flex; align-items: center; gap: 8px; padding-top: 76px; }
+    .file-security { margin-top: 19px; color: var(--muted); font-size: 12px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .button:hover { background: var(--hover); }
+    .button.primary { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
+    .button.primary:hover { opacity: .88; }
+    .button.danger { border-color: var(--danger); color: var(--danger); }
+    .button.text { border-color: transparent; padding: 0 7px; color: var(--muted); }
+    .button.text:hover { color: var(--text); }
+    .button.small { min-height: 28px; padding: 0 8px; font-size: 11px; }
+    .button .icon { font-size: 14px; line-height: 1; }
+
+    .config-tabs { display: flex; gap: 26px; min-height: 49px; border-bottom: 1px solid var(--line); }
+    .config-tab { position: relative; border: 0; background: transparent; color: var(--muted); font-weight: 600; }
+    .config-tab:hover { color: var(--text); }
+    .config-tab.active { color: var(--text); }
+    .config-tab.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 1px; background: var(--text); content: ""; }
+    .tab-content { padding-top: 17px; }
+    .tab-note { margin-bottom: 17px; color: var(--muted); font-size: 12px; }
+    .section-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .section-toolbar .button { flex: 0 0 auto; }
+
+    .service-list { display: grid; gap: 9px; }
+    .service-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 70px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
+    .service-row:hover { border-color: var(--line-strong); background: var(--hover); }
+    .service-main { min-width: 0; }
+    .service-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+    .service-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .service-subtitle { margin-top: 6px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .service-actions { display: flex; align-items: center; gap: 8px; margin-left: 20px; }
+    .service-icon { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); font-size: 15px; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; width: max-content; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--muted); font-size: 10px; font-weight: 500; }
+    .badge.success { border-color: rgba(34,197,94,.35); background: var(--success-bg); color: var(--success); }
+    .badge.warn { border-color: rgba(234,179,8,.35); background: var(--warn-bg); color: var(--warn); }
+    .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .service-tag { margin-left: 3px; color: var(--muted); font-size: 11px; }
+
+    .drawer-backdrop, .modal-backdrop { display: none; position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.45); }
+    .drawer-backdrop.open, .modal-backdrop.open { display: block; }
+    .drawer { position: absolute; top: 0; right: 0; bottom: 0; display: flex; width: 640px; max-width: 92vw; flex-direction: column; border-left: 1px solid var(--line-strong); background: var(--elevated); box-shadow: -10px 0 35px rgba(0,0,0,.18); }
+    .drawer-header, .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; min-height: 58px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+    .drawer-header h2, .modal-header h2 { font-size: 16px; }
+    .drawer-header small, .modal-header small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 400; }
+    .close-button { border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; }
+    .close-button:hover { color: var(--text); }
+    .drawer-body { flex: 1; overflow-y: auto; padding: 17px 20px 25px; }
+    .drawer-footer, .modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 13px 20px; border-top: 1px solid var(--line); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px 12px; }
+    .field { min-width: 0; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { display: block; margin-bottom: 6px; color: var(--text); font-size: 12px; font-weight: 500; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 33px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--field); color: var(--text); padding: 7px 9px; }
+    .field textarea { min-height: 72px; resize: vertical; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--text); outline: 0; }
+    .field-hint { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .drawer-section { margin-top: 25px; }
+    .drawer-section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .drawer-section-header p { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .workflow-list { display: grid; gap: 7px; }
+    .workflow-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+    .workflow-row:hover { background: var(--hover); }
+    .workflow-mark { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--muted); }
+    .workflow-copy { min-width: 0; }
+    .workflow-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .workflow-copy small { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .workflow-actions { display: flex; align-items: center; gap: 4px; }
+    .security-note { margin-top: 19px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .security-note strong { color: var(--text); }
+
+    .modal-backdrop { align-items: center; justify-content: center; padding: 18px; }
+    .modal-backdrop.open { display: flex; }
+    .modal { width: min(540px, 100%); max-height: calc(100vh - 36px); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--elevated); box-shadow: 0 20px 60px rgba(0,0,0,.27); }
+    .modal-body { max-height: calc(100vh - 160px); overflow-y: auto; padding: 18px 20px; }
+    .radio-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .radio-option { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); }
+    .radio-option:has(input:checked) { border-color: var(--text); background: var(--selected); }
+    .radio-option small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+
+    .workflow-modal { width: min(1080px, 96vw); }
+    .workflow-modal .modal-body { padding: 0; max-height: calc(100vh - 116px); }
+    .workflow-tabs { display: flex; gap: 25px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+    .workflow-tab { position: relative; min-height: 45px; border: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .workflow-tab.active { color: var(--text); }
+    .workflow-tab.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 1px; background: var(--text); content: ""; }
+    .workflow-stage { display: none; padding: 18px 20px 21px; }
+    .workflow-stage.active { display: block; }
+    .workflow-stage-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; }
+    .sub-panel { min-width: 0; border: 1px solid var(--line); border-radius: 6px; }
+    .sub-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 47px; padding: 0 13px; border-bottom: 1px solid var(--line); }
+    .sub-panel-header small { color: var(--muted); font-size: 10px; }
+    .sub-panel-body { padding: 13px; }
+    .param-table { overflow: hidden; border: 1px solid var(--line); border-radius: 6px; }
+    .param-head, .param-row { display: grid; grid-template-columns: 1fr 1fr .78fr 1fr 28px; align-items: center; gap: 7px; }
+    .param-head { min-height: 36px; padding: 0 10px; background: var(--hover); color: var(--muted); font-size: 10px; font-weight: 600; }
+    .param-row { min-height: 46px; padding: 6px 10px; border-top: 1px solid var(--line); }
+    .param-row input, .param-row select { width: 100%; min-width: 0; min-height: 29px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--field); color: var(--text); padding: 5px 6px; font-size: 11px; }
+    .param-row .key { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .remove-param { border: 0; background: transparent; color: var(--muted); font-size: 17px; }
+    .remove-param:hover { color: var(--danger); }
+    .add-param { width: 100%; min-height: 36px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 11px; }
+    .add-param:hover { background: var(--hover); color: var(--text); }
+    .binding-list { display: grid; gap: 8px; }
+    .binding { padding: 10px; border: 1px solid var(--line); border-radius: 5px; }
+    .binding-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-size: 11px; font-weight: 600; }
+    .binding-target { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .binding-target select { width: 100%; min-height: 29px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--field); color: var(--text); padding: 5px 6px; font-size: 10px; }
+    .binding-code { margin-top: 13px; padding: 11px; border-radius: 5px; background: #151515; color: #d6d3d1; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; line-height: 1.7; white-space: pre-wrap; }
+    [data-theme="light"] .binding-code { background: #1c1917; }
+    .code-blue { color: #93c5fd; }
+    .code-yellow { color: #fcd34d; }
+    .output-options { display: grid; gap: 8px; }
+    .output-option { display: flex; align-items: flex-start; gap: 9px; padding: 11px; border: 1px solid var(--line); border-radius: 6px; }
+    .output-option:has(input:checked) { border-color: var(--text); background: var(--selected); }
+    .output-option small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .preview { display: grid; place-items: center; min-height: 230px; border: 1px dashed var(--line-strong); border-radius: 6px; color: var(--muted); text-align: center; }
+    .preview-icon { margin-bottom: 9px; color: var(--text); font-size: 30px; }
+    .test-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); gap: 14px; }
+    .console { min-height: 282px; padding: 13px; border-radius: 6px; background: #151515; color: #a8a29e; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; line-height: 1.8; }
+    .console .ok { color: #86efac; }
+    .console .pending { color: #facc15; }
+    .test-result { margin-top: 12px; padding: 10px; border: 1px solid rgba(34,197,94,.35); border-radius: 6px; background: var(--success-bg); color: var(--success); font-size: 11px; }
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 40; transform: translateY(12px); opacity: 0; pointer-events: none; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--elevated); color: var(--text); box-shadow: 0 8px 28px rgba(0,0,0,.25); transition: .2s ease; }
+    .toast.visible { transform: translateY(0); opacity: 1; }
+    .hidden { display: none !important; }
+
+    @media (max-width: 900px) {
+      html, body { min-width: 0; }
+      .app-header { padding: 0 14px; }
+      .top-nav { margin-left: 10px; overflow: hidden; }
+      .top-nav button { padding: 0 6px; font-size: 11px; }
+      .agent-status { display: none; }
+      .page { padding-right: 15px; padding-left: 15px; }
+      .page-heading { display: block; }
+      .page-actions { padding-top: 16px; }
+      .workflow-stage-grid, .test-grid { grid-template-columns: 1fr; }
+      .param-head, .param-row { grid-template-columns: 1fr 1fr .78fr 1fr 22px; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark">⌃</span><span class="brand-name">无限画布</span></div>
+    <nav class="top-nav" aria-label="主导航">
+      <button><span class="nav-icon">↗</span>我的画布</button>
+      <button><span class="nav-icon">✣</span>生图工作台</button>
+      <button><span class="nav-icon">▣</span>视频创作台</button>
+      <button><span class="nav-icon">▤</span>提示词</button>
+      <button class="active"><span class="nav-icon">⚙</span>配置</button>
+    </nav>
+    <div class="header-spacer"></div>
+    <div class="header-tools">
+      <span class="agent-status"><span class="dot"></span>本地 Agent 已连接</span>
+      <button class="header-action icon-only" title="切换主题" aria-label="切换主题" id="themeToggle">◐</button>
+      <button class="header-action">中</button>
+      <button class="header-action">v0.16.0</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="page-heading">
+      <div>
+        <h1>配置与用户偏好</h1>
+        <p class="page-description">渠道聚合、模型选择、同步与本地存储</p>
+        <p class="file-security">JSON 文件包含 API Key 和 WebDAV 凭据，请妥善保管。</p>
+      </div>
+      <div class="page-actions"><button class="button"><span class="icon">⇧</span>导入配置</button><button class="button"><span class="icon">⇩</span>导出配置</button></div>
+    </div>
+
+    <nav class="config-tabs" aria-label="配置页签">
+      <button class="config-tab">渠道</button>
+      <button class="config-tab">偏好设置</button>
+      <button class="config-tab active">本地 ComfyUI</button>
+      <button class="config-tab">提示词来源</button>
+      <button class="config-tab">WebDAV</button>
+      <button class="config-tab">本地存储</button>
+    </nav>
+
+    <section class="tab-content">
+      <p class="tab-note">管理本机或局域网 ComfyUI 服务，并将 API 工作流注册为可选择的生图 / 视频模型。</p>
+      <div class="section-toolbar"><h2>ComfyUI 服务</h2><button id="openServiceModal" class="button primary"><span class="icon">＋</span>新增服务</button></div>
+      <div class="service-list">
+        <article class="service-row">
+          <div class="service-main"><div class="service-title"><span class="service-icon">⌘</span><strong>ComfyUI 本地</strong><span class="badge success"><span class="dot"></span>在线</span></div><div class="service-subtitle">OpenAI · 2 个工作流 · http://127.0.0.1:8188</div></div>
+          <div class="service-actions"><button class="button small edit-service">编辑</button><button class="button small danger" title="删除服务" aria-label="删除服务">⌫</button></div>
+        </article>
+        <article class="service-row">
+          <div class="service-main"><div class="service-title"><span class="service-icon">⌘</span><strong>ComfyUI 局域网</strong><span class="badge warn"><span class="dot"></span>未测试</span></div><div class="service-subtitle">OpenAI · 0 个工作流 · http://192.168.1.42:8188</div></div>
+          <div class="service-actions"><button class="button small edit-service">编辑</button><button class="button small danger" title="删除服务" aria-label="删除服务">⌫</button></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <div id="serviceModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="serviceModalTitle">
+    <div class="modal">
+      <div class="modal-header"><div><h2 id="serviceModalTitle">新增 ComfyUI 服务</h2><small>服务配置保存在当前浏览器中</small></div><button class="close-button" data-close="serviceModal" aria-label="关闭">×</button></div>
+      <div class="modal-body"><div class="form-grid"><div class="field full"><label>服务名称</label><input value="ComfyUI 本地" placeholder="例如：工作站 ComfyUI"></div><div class="field full"><label>Base URL</label><input value="http://127.0.0.1:8188" placeholder="http://127.0.0.1:8188"><div class="field-hint">只填写服务根地址，不要包含 /prompt 或 /history。</div></div><div class="field full"><label>API Key <span style="color:var(--muted);font-weight:400">（可选）</span></label><input type="password" placeholder="如 ComfyUI 配置了鉴权"></div><div class="field full"><label>连接方式</label><div class="radio-group"><label class="radio-option"><input type="radio" name="serviceType" checked><span><strong>本机直连</strong><small>127.0.0.1 / localhost</small></span></label><label class="radio-option"><input type="radio" name="serviceType"><span><strong>局域网服务</strong><small>192.168.x.x</small></span></label></div></div></div></div>
+      <div class="modal-footer"><button class="button" data-close="serviceModal">取消</button><button id="createService" class="button primary">创建并测试</button></div>
+    </div>
+  </div>
+
+  <div id="serviceDrawer" class="drawer-backdrop" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+    <aside class="drawer">
+      <div class="drawer-header"><div><h2 id="drawerTitle">编辑 ComfyUI 本地</h2><small>服务地址、工作流和连接状态</small></div><button class="close-button" data-close="serviceDrawer" aria-label="关闭">×</button></div>
+      <div class="drawer-body">
+        <div class="form-grid"><div class="field full"><label>服务名称</label><input value="ComfyUI 本地"></div><div class="field full"><label>Base URL</label><input value="http://127.0.0.1:8188"><div class="field-hint">运行时会自动调用 /prompt、/history、/view 等接口。</div></div><div class="field full"><label>API Key <span style="color:var(--muted);font-weight:400">（可选）</span></label><input type="password" value="local-comfy-key"></div></div>
+        <div class="drawer-section"><div class="drawer-section-header"><div><h3>工作流</h3><p>导入 API 格式 JSON，注册后可在生图 / 视频工作台选择。</p></div><button id="importWorkflow" class="button small"><span class="icon">＋</span>导入 JSON</button></div><div class="workflow-list"><div class="workflow-row"><div class="workflow-mark">▧</div><div class="workflow-copy"><strong>Z-Image 生图</strong><small>生图 · 8 个参数 · 输出节点 11</small></div><div class="workflow-actions"><button class="button text small edit-workflow">编辑</button><button class="button text small" title="更多操作">⋯</button></div></div><div class="workflow-row"><div class="workflow-mark">▣</div><div class="workflow-copy"><strong>MiniMax H3 视频</strong><small>视频 · 6 个参数 · 输出节点 303</small></div><div class="workflow-actions"><button class="button text small edit-workflow">编辑</button><button class="button text small" title="更多操作">⋯</button></div></div></div></div>
+        <div class="security-note"><strong>跨域访问</strong><br>ComfyUI 启动时需要允许当前网页跨域，例如添加 <code>--enable-cors-header</code>。</div>
+      </div>
+      <div class="drawer-footer"><button class="button" data-close="serviceDrawer">取消</button><button id="testConnection" class="button">测试连接</button><button id="saveService" class="button primary">保存</button></div>
+    </aside>
+  </div>
+
+  <div id="workflowModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="workflowModalTitle">
+    <div class="modal workflow-modal">
+      <div class="modal-header"><div><h2 id="workflowModalTitle">Z-Image 生图</h2><small>ComfyUI 本地 / API 工作流</small></div><button class="close-button" data-close="workflowModal" aria-label="关闭">×</button></div>
+      <div class="modal-body">
+        <nav class="workflow-tabs"><button class="workflow-tab" data-stage="workflow">工作流</button><button class="workflow-tab active" data-stage="params">输入参数</button><button class="workflow-tab" data-stage="output">输出节点</button><button class="workflow-tab" data-stage="test">测试保存</button></nav>
+        <section class="workflow-stage" data-stage-panel="workflow"><div class="workflow-stage-grid"><div class="sub-panel"><div class="sub-panel-header"><div><h3>工作流 JSON</h3><small>已导入 17 个节点</small></div><button class="button small">重新导入</button></div><div class="sub-panel-body"><div class="field"><label>工作流名称</label><input value="Z-Image 生图"></div><div class="field" style="margin-top:12px"><label>生成能力</label><select><option>生图</option><option>视频</option></select></div><div class="field" style="margin-top:12px"><label>API 工作流</label><textarea style="height:250px;font-family:ui-monospace,monospace;font-size:10px">{
+  "3": { "class_type": "CLIPTextEncode" },
+  "4": { "class_type": "CLIPTextEncode" },
+  "5": { "class_type": "EmptyLatentImage" },
+  "11": { "class_type": "SaveImage" }
+}</textarea></div></div></div><div class="sub-panel"><div class="sub-panel-header"><h3>节点概览</h3><span class="badge">17 nodes</span></div><div class="sub-panel-body"><div class="binding-list"><div class="binding"><div class="binding-title">文本编码 <span class="badge">2 输入</span></div><div class="field-hint">节点 3 / 4 · CLIPTextEncode</div></div><div class="binding"><div class="binding-title">画布尺寸 <span class="badge">2 输入</span></div><div class="field-hint">节点 5 · EmptyLatentImage</div></div><div class="binding"><div class="binding-title">图片输出 <span class="badge success"><span class="dot"></span>已识别</span></div><div class="field-hint">节点 11 · SaveImage</div></div></div></div></div></div></section>
+        <section class="workflow-stage active" data-stage-panel="params"><div class="workflow-stage-grid"><div class="sub-panel"><div class="sub-panel-header"><div><h3>可编辑参数</h3><small>会显示在生图设置面板，并保存到画布节点</small></div><span class="badge">8 个参数</span></div><div class="param-table"><div class="param-head"><span>参数名</span><span>显示名</span><span>类型</span><span>默认值</span><span></span></div><div id="paramRows"><div class="param-row"><input class="key" value="prompt"><input value="正面提示词"><select><option>多行文本</option><option>单行文本</option></select><input value=""><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="negativePrompt"><input value="负面提示词"><select><option>多行文本</option><option>单行文本</option></select><input value="blurry ugly bad"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="width"><input value="宽度"><select><option>数字</option><option>下拉选项</option></select><input value="1024"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="height"><input value="高度"><select><option>数字</option><option>下拉选项</option></select><input value="1024"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="steps"><input value="采样步数"><select><option>数字</option><option>下拉选项</option></select><input value="28"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="cfg"><input value="CFG"><select><option>数字</option><option>下拉选项</option></select><input value="3.5"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="sampler"><input value="采样器"><select><option>下拉选项</option><option>单行文本</option></select><input value="euler"><button class="remove-param" title="删除参数">×</button></div><div class="param-row"><input class="key" value="seed"><input value="Seed"><select><option>Seed</option><option>数字</option></select><input value="随机"><button class="remove-param" title="删除参数">×</button></div></div><button id="addParam" class="add-param">＋ 添加自定义参数</button></div></div><div class="sub-panel"><div class="sub-panel-header"><div><h3>节点输入绑定</h3><small>每个参数必须指向一个节点输入</small></div><span class="badge success">自动识别</span></div><div class="sub-panel-body"><div class="binding-list"><div class="binding"><div class="binding-title">正面提示词</div><div class="binding-target"><select><option>节点 3</option></select><select><option>text</option></select></div></div><div class="binding"><div class="binding-title">负面提示词</div><div class="binding-target"><select><option>节点 4</option></select><select><option>text</option></select></div></div><div class="binding"><div class="binding-title">宽度</div><div class="binding-target"><select><option>节点 5</option></select><select><option>width</option></select></div></div><div class="binding"><div class="binding-title">高度</div><div class="binding-target"><select><option>节点 5</option></select><select><option>height</option></select></div></div></div><div class="binding-code"><span class="code-blue">3.inputs.text</span> = <span class="code-yellow">params.prompt</span>
+<span class="code-blue">4.inputs.text</span> = <span class="code-yellow">params.negativePrompt</span>
+<span class="code-blue">5.inputs.width</span> = Number(<span class="code-yellow">params.width</span>)
+<span class="code-blue">5.inputs.height</span> = Number(<span class="code-yellow">params.height</span>)</div></div></div></div></section>
+        <section class="workflow-stage" data-stage-panel="output"><div class="workflow-stage-grid"><div class="sub-panel"><div class="sub-panel-header"><div><h3>输出节点</h3><small>从 /history 返回结果中提取文件</small></div><span class="badge success">图片</span></div><div class="sub-panel-body"><div class="output-options"><label class="output-option"><input type="radio" name="output" checked><span><strong>节点 11 · SaveImage</strong><small>image · ComfyUI_00001_.png</small></span></label><label class="output-option"><input type="radio" name="output"><span><strong>节点 8 · PreviewImage</strong><small>image · 预览结果</small></span></label></div></div></div><div class="preview"><div><div class="preview-icon">▧</div><strong>输出预览</strong><div style="margin-top:5px;font-size:11px">测试运行后显示图片</div></div></div></div></section>
+        <section class="workflow-stage" data-stage-panel="test"><div class="test-grid"><div class="sub-panel"><div class="sub-panel-header"><div><h3>运行测试</h3><small>使用最小参数验证工作流</small></div><span class="badge success"><span class="dot"></span>可测试</span></div><div class="sub-panel-body"><div class="field"><label>测试提示词</label><textarea id="testPrompt">一只坐在窗边的橘猫，午后阳光，电影感，高细节</textarea></div><div class="form-grid" style="margin-top:12px"><div class="field"><label>宽度</label><input value="1024"></div><div class="field"><label>高度</label><input value="1024"></div></div><button id="runTest" class="button primary" style="width:100%;margin-top:14px">▶ 运行测试</button><div id="testResult" class="test-result">上次测试成功 · 1 张图片 · 2.8 秒</div></div></div><div id="testConsole" class="console"><span class="ok">$ comfyui.workflow.test()</span><br><span class="pending">POST</span> /prompt<br><span class="ok">✓ prompt_id</span> 8f2c1a7d...<br><span class="pending">POLL</span> /history/8f2c1a7d...<br><span class="ok">✓ output</span> node 11 / image<br><span class="ok">✓ ready</span> workflow is valid</div></div></section>
+      </div>
+      <div class="modal-footer"><button class="button" data-close="workflowModal">取消</button><button id="saveWorkflow" class="button primary">保存工作流</button></div>
+    </div>
+  </div>
+
+  <div id="importModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+    <div class="modal"><div class="modal-header"><div><h2 id="importModalTitle">导入 ComfyUI 工作流</h2><small>请选择 ComfyUI 导出的 API 格式 JSON</small></div><button class="close-button" data-close="importModal" aria-label="关闭">×</button></div><div class="modal-body"><div class="field"><label>工作流文件</label><input id="workflowFile" type="file" accept="application/json,.json"></div><div class="field" style="margin-top:14px"><label>工作流名称</label><input value="新建 ComfyUI 工作流"></div><div class="field-hint" style="margin-top:13px">导入后会自动识别提示词、尺寸、采样器和输出节点；未识别的输入可以在工作流编辑器中手动绑定。</div></div><div class="modal-footer"><button class="button" data-close="importModal">取消</button><button id="confirmImport" class="button primary">导入并解析</button></div></div>
+  </div>
+
+  <div id="toast" class="toast">已保存</div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+    const toast = $("#toast");
+    let toastTimer;
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("visible");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("visible"), 2200);
+    }
+
+    function openLayer(id) { $("#" + id).classList.add("open"); }
+    function closeLayer(id) { $("#" + id).classList.remove("open"); }
+
+    $$('[data-close]').forEach((button) => button.addEventListener("click", () => closeLayer(button.dataset.close)));
+    $$(".modal-backdrop, .drawer-backdrop").forEach((layer) => layer.addEventListener("click", (event) => { if (event.target === layer) layer.classList.remove("open"); }));
+    $("#openServiceModal").addEventListener("click", () => openLayer("serviceModal"));
+    $("#createService").addEventListener("click", () => { closeLayer("serviceModal"); showToast("服务已创建，连接测试成功"); });
+    $("#testConnection").addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      button.textContent = "测试中…";
+      button.disabled = true;
+      setTimeout(() => { button.textContent = "测试连接"; button.disabled = false; showToast("连接成功：ComfyUI API 可用"); }, 850);
+    });
+    $("#saveService").addEventListener("click", () => { closeLayer("serviceDrawer"); showToast("服务配置已保存"); });
+    $$(".edit-service").forEach((button) => button.addEventListener("click", () => openLayer("serviceDrawer")));
+    $$(".edit-workflow").forEach((button) => button.addEventListener("click", () => { closeLayer("serviceDrawer"); openLayer("workflowModal"); setStage("params"); }));
+    $("#importWorkflow").addEventListener("click", () => openLayer("importModal"));
+    $("#confirmImport").addEventListener("click", () => { closeLayer("importModal"); closeLayer("serviceDrawer"); openLayer("workflowModal"); setStage("workflow"); showToast("工作流已导入，正在解析节点"); });
+    $("#workflowFile").addEventListener("change", (event) => { const file = event.target.files[0]; if (file) showToast("已选择 " + file.name); });
+    $("#saveWorkflow").addEventListener("click", () => { closeLayer("workflowModal"); showToast("工作流配置已保存"); });
+
+    function setStage(stage) {
+      $$(".workflow-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.stage === stage));
+      $$('[data-stage-panel]').forEach((panel) => panel.classList.toggle("active", panel.dataset.stagePanel === stage));
+    }
+    $$(".workflow-tab").forEach((tab) => tab.addEventListener("click", () => setStage(tab.dataset.stage)));
+
+    function bindRemoveButtons(root = document) {
+      $$(".remove-param", root).forEach((button) => {
+        if (button.dataset.bound) return;
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => { button.closest(".param-row").remove(); showToast("参数已删除"); });
+      });
+    }
+    $("#addParam").addEventListener("click", () => {
+      const row = document.createElement("div");
+      row.className = "param-row";
+      row.innerHTML = '<input class="key" value="customParam"><input value="自定义参数"><select><option>单行文本</option><option>多行文本</option><option>数字</option><option>下拉选项</option><option>开关</option></select><input value=""><button class="remove-param" title="删除参数">×</button>';
+      $("#paramRows").appendChild(row);
+      bindRemoveButtons(row);
+      row.querySelector(".key").focus();
+      showToast("已添加自定义参数");
+    });
+    $("#runTest").addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      const result = $("#testResult");
+      const consoleBox = $("#testConsole");
+      button.disabled = true;
+      button.textContent = "⟳ 运行中…";
+      result.textContent = "正在等待 ComfyUI 返回结果…";
+      result.style.color = "var(--warn)";
+      result.style.borderColor = "rgba(234,179,8,.35)";
+      result.style.background = "var(--warn-bg)";
+      consoleBox.innerHTML = '<span class="ok">$ comfyui.workflow.test()</span><br><span class="pending">POST</span> /prompt<br><span class="pending">POLL</span> /history/8f2c1a7d...<br><span class="pending">… running</span>';
+      setTimeout(() => {
+        consoleBox.innerHTML = '<span class="ok">$ comfyui.workflow.test()</span><br><span class="pending">POST</span> /prompt<br><span class="ok">✓ prompt_id</span> 8f2c1a7d...<br><span class="pending">POLL</span> /history/8f2c1a7d...<br><span class="ok">✓ output</span> node 11 / image<br><span class="ok">✓ ready</span> workflow is valid';
+        result.textContent = "测试成功 · 1 张图片 · 2.8 秒";
+        result.style.color = "var(--success)";
+        result.style.borderColor = "rgba(34,197,94,.35)";
+        result.style.background = "var(--success-bg)";
+        button.disabled = false;
+        button.textContent = "▶ 运行测试";
+        showToast("测试成功：已找到图片输出");
+      }, 1250);
+    });
+    $("#themeToggle").addEventListener("click", () => { document.body.dataset.theme = document.body.dataset.theme === "dark" ? "light" : "dark"; });
+    $$(".config-tab").forEach((tab) => tab.addEventListener("click", () => { $$(".config-tab").forEach((item) => item.classList.remove("active")); tab.classList.add("active"); if (tab.textContent !== "本地 ComfyUI") showToast("当前原型聚焦本地 ComfyUI Tab"); }));
+    bindRemoveButtons();
+  </script>
+</body>
+</html>

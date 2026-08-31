@@ -67,7 +67,6 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 
 async function createPluginVideoTask(config: AiConfig, model: string, script: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
     if (!config.baseUrl.trim()) throw new Error(apiText("baseUrlRequired"));
-    if (!config.apiKey.trim()) throw new Error(apiText("apiKeyRequired"));
     const refs = await Promise.all(references.map((image) => imageToDataUrl(image)));
     const result = videoPluginResult(
         await runModelPlugin({
@@ -80,6 +79,7 @@ async function createPluginVideoTask(config: AiConfig, model: string, script: st
                 seconds: normalizeVideoSeconds(config.videoSeconds),
                 size: normalizeVideoSize(config.size),
                 resolution: normalizeVideoResolution(config.vquality),
+                megapixels: normalizeVideoMegapixels(config.videoMegapixels),
                 ratio: config.size,
                 generateAudio: boolConfig(config.videoGenerateAudio, true),
                 watermark: boolConfig(config.videoWatermark, false),
@@ -187,6 +187,12 @@ function normalizeVideoResolution(value: string) {
     if (value === "auto" || value === "high" || value === "medium") return "720p";
     const resolution = value.replace(/p$/i, "") || "720";
     return `${resolution}p`;
+}
+
+function normalizeVideoMegapixels(value: string) {
+    const megapixels = Number(value);
+    if (!Number.isFinite(megapixels)) return 0.7;
+    return Math.max(0.1, Math.min(16, Math.round(megapixels * 10) / 10));
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse) {

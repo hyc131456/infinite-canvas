@@ -60,7 +60,7 @@ type GenerationLog = {
     thumbnails: string[];
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "size" | "count" | "negativePrompt" | "comfyUiParams">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -301,6 +301,8 @@ export default function ImagePage() {
         if (log.config.quality) updateConfig("quality", log.config.quality);
         if (log.config.size) updateConfig("size", log.config.size);
         if (log.config.count) updateConfig("count", log.config.count);
+        if (typeof log.config.negativePrompt === "string") updateConfig("negativePrompt", log.config.negativePrompt);
+        if (log.config.comfyUiParams) updateConfig("comfyUiParams", log.config.comfyUiParams);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
     };
 
@@ -565,7 +567,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog }: {
                 <ModelPicker config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={config} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
+                <ImageSettingsPanel config={config} model={model} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" maxCount={10} />
             </div>
         </>
     );
@@ -832,6 +834,8 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         quality: log.config?.quality || log.quality || "",
         size: log.config?.size || log.size || "",
         count: log.config?.count || String(log.imageCount || log.successCount || 1),
+        negativePrompt: log.config?.negativePrompt || "",
+        comfyUiParams: log.config?.comfyUiParams || {},
     };
 }
 
@@ -880,6 +884,8 @@ function buildLog({
         quality: config.quality,
         size: config.size,
         count: config.count,
+        negativePrompt: config.negativePrompt,
+        comfyUiParams: config.comfyUiParams,
     };
     return {
         id: nanoid(),
