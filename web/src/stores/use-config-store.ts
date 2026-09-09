@@ -4,9 +4,6 @@ import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
 
 import i18n from "@/i18n";
-import { getComfyUiMinimaxH3Script } from "@/services/api/comfyui-minimax-h3-template";
-import { comfyUiModelLabel, comfyUiModelOptions, findComfyUiWorkflow, getComfyUiServices, isComfyUiModelValue } from "@/stores/use-comfyui-store";
-import type { ComfyUiParamValue } from "@/types/comfyui";
 
 export type ApiCallFormat = "openai" | "gemini";
 export type ModelCapability = "image" | "video" | "text" | "audio";
@@ -44,19 +41,19 @@ export type AiConfig = {
     audioInstructions: string;
     videoSeconds: string;
     vquality: string;
-    videoMegapixels: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoMode: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     models: string[];
     quality: string;
     size: string;
-    negativePrompt: string;
-    comfyUiParams: Record<string, Record<string, ComfyUiParamValue>>;
     background: string;
     count: string;
     canvasImageCount: string;
+    proxyEnabled: boolean;
+    proxyUrl: string;
 };
 
 export type WebdavSyncConfig = {
@@ -66,26 +63,19 @@ export type WebdavSyncConfig = {
     directory: string;
     lastSyncedAt: string;
 };
-export type ConfigTabKey = "channels" | "preferences" | "comfyui" | "prompt-sources" | "webdav" | "local-storage";
+export type ConfigTabKey = "channels" | "local-proxy" | "preferences" | "prompt-sources" | "webdav" | "local-storage";
+
+export type ChannelCredentialsImportResult = {
+    status: "created" | "updated" | "missing-base-url" | "invalid-base-url";
+    channelName?: string;
+};
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
 const CHANNEL_MODEL_SEPARATOR = "::";
 const OPENAI_BASE_URL = "https://api.openai.com";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
-const COMFYUI_CHANNEL_ID = "comfyui-local";
-const COMFYUI_MINIMAX_H3_MODEL = "minimax-h3-local";
-const COMFYUI_MINIMAX_H3_VALUE = `${COMFYUI_CHANNEL_ID}${CHANNEL_MODEL_SEPARATOR}${COMFYUI_MINIMAX_H3_MODEL}`;
-
-function comfyUiChannel(): ModelChannel {
-    return {
-        id: COMFYUI_CHANNEL_ID,
-        name: "ComfyUI 本地",
-        baseUrl: "http://127.0.0.1:8188",
-        apiKey: "",
-        apiFormat: "openai",
-        models: [{ name: COMFYUI_MINIMAX_H3_MODEL, capability: "video", script: getComfyUiMinimaxH3Script() }],
-    };
-}
+export const LOCAL_PROXY_PACKAGE = "@basketikun/canvas-proxy";
+export const DEFAULT_LOCAL_PROXY_URL = "http://127.0.0.1:23210";
 
 export const defaultConfig: AiConfig = {
     channelMode: "local",
@@ -106,11 +96,10 @@ export const defaultConfig: AiConfig = {
                 { name: "gpt-4o-mini-tts", capability: "audio" },
             ],
         },
-        comfyUiChannel(),
     ],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
-    videoModel: COMFYUI_MINIMAX_H3_VALUE,
+    videoModel: "default::grok-imagine-video",
     textModel: "default::gpt-5.5",
     audioModel: "default::gpt-4o-mini-tts",
     audioVoice: "alloy",
@@ -119,19 +108,19 @@ export const defaultConfig: AiConfig = {
     audioInstructions: "",
     videoSeconds: "6",
     vquality: "720",
-    videoMegapixels: "0.7",
     videoGenerateAudio: "true",
     videoWatermark: "false",
+    videoMode: "frames",
     systemPrompt: "",
     reasoningEffort: "auto",
-    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts", COMFYUI_MINIMAX_H3_VALUE],
+    models: ["default::gpt-image-2", "default::grok-imagine-video", "default::gpt-5.5", "default::gpt-4o-mini-tts"],
     quality: "auto",
     size: "1:1",
-    negativePrompt: "blurry ugly bad",
-    comfyUiParams: {},
     background: "",
     count: "1",
     canvasImageCount: "3",
+    proxyEnabled: false,
+    proxyUrl: DEFAULT_LOCAL_PROXY_URL,
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
@@ -149,6 +138,7 @@ type ConfigStore = {
     configTab: ConfigTabKey;
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+    importChannelCredentials: (input: { baseUrl?: string | null; apiKey?: string | null }) => ChannelCredentialsImportResult;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean, tab?: ConfigTabKey) => void;
@@ -182,8 +172,6 @@ function findChannelModel(config: AiConfig, value: string): { channel: ModelChan
 }
 
 export function modelCapabilityOf(config: AiConfig, value: string): ModelCapability | undefined {
-    const comfyMatch = findComfyUiWorkflow(getComfyUiServices(), value);
-    if (comfyMatch?.service.enabled && comfyMatch.workflow.capability === "image") return "image";
     return findChannelModel(config, value)?.model.capability;
 }
 
@@ -201,9 +189,8 @@ export function resolveModelForCapability(config: AiConfig, currentModel: string
 }
 
 export function selectableModelsByCapability(config: AiConfig, capability?: ModelCapability) {
-    const channelModels = capability ? config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name))) : config.models;
-    const comfyModels = !capability || capability === "image" ? comfyUiModelOptions(getComfyUiServices(), "image") : [];
-    return uniqueModelOptions([...channelModels, ...comfyModels]);
+    if (!capability) return config.models;
+    return config.channels.flatMap((channel) => channel.models.filter((model) => model.capability === capability).map((model) => encodeChannelModel(channel.id, model.name)));
 }
 
 /** The user script (if any) attached to a model; empty string means use the system default call. */
@@ -212,10 +199,8 @@ export function resolveModelScript(config: AiConfig, value: string) {
 }
 
 function isAiConfigReady(config: AiConfig, model: string) {
-    const comfyMatch = findComfyUiWorkflow(getComfyUiServices(), model);
-    if (comfyMatch) return Boolean(comfyMatch.workflow.capability === "image" && comfyMatch.service.enabled && comfyMatch.service.baseUrl.trim());
     const channel = resolveModelChannel(config, model);
-    return Boolean(model.trim() && channel.baseUrl.trim() && (resolveModelScript(config, model) || channel.apiKey.trim()));
+    return Boolean(model.trim() && channel.baseUrl.trim() && channel.apiKey.trim());
 }
 
 export const useConfigStore = create<ConfigStore>()(
@@ -233,6 +218,12 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: value,
                     },
                 })),
+            importChannelCredentials: (input) => {
+                const currentConfig = get().config;
+                const result = upsertChannelCredentials(currentConfig, input);
+                if (result.config !== currentConfig) set({ config: result.config });
+                return { status: result.status, channelName: result.channelName };
+            },
             updateWebdavConfig: (key, value) =>
                 set((state) => ({
                     webdav: {
@@ -256,8 +247,6 @@ export const useConfigStore = create<ConfigStore>()(
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
                 const models = modelOptionsFromChannels(channels);
-                const videoModel = normalizeModelOptionValue(config.videoModel, channels);
-                const hasVideoModel = channels.some((channel) => channel.models.some((model) => model.capability === "video" && encodeChannelModel(channel.id, model.name) === videoModel));
                 return {
                     ...current,
                     webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
@@ -268,7 +257,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channels,
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
-                        videoModel: hasVideoModel ? videoModel : COMFYUI_MINIMAX_H3_VALUE,
+                        videoModel: normalizeModelOptionValue(config.videoModel, channels),
                         textModel: normalizeModelOptionValue(config.textModel || config.model, channels),
                         audioModel: normalizeModelOptionValue(config.audioModel || defaultConfig.audioModel, channels),
                         audioVoice: config.audioVoice || defaultConfig.audioVoice,
@@ -278,12 +267,12 @@ export const useConfigStore = create<ConfigStore>()(
                         reasoningEffort: config.reasoningEffort || "auto",
                         videoSeconds: config.videoSeconds || "6",
                         vquality: config.vquality || "720",
-                        videoMegapixels: config.videoMegapixels || "0.7",
-                        negativePrompt: config.negativePrompt ?? defaultConfig.negativePrompt,
-                        comfyUiParams: config.comfyUiParams || {},
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoMode: config.videoMode === "reference" ? "reference" : "frames",
                         canvasImageCount: config.canvasImageCount || "3",
+                        proxyEnabled: Boolean(config.proxyEnabled),
+                        proxyUrl: config.proxyUrl || DEFAULT_LOCAL_PROXY_URL,
                     },
                 };
             },
@@ -323,6 +312,70 @@ export function createModelChannel(channel?: Partial<ModelChannel>): ModelChanne
     };
 }
 
+export function upsertChannelCredentials(
+    config: AiConfig,
+    input: { baseUrl?: string | null; apiKey?: string | null },
+): ChannelCredentialsImportResult & { config: AiConfig } {
+    const rawBaseUrl = input.baseUrl?.trim() || "";
+    if (!rawBaseUrl) return { status: "missing-base-url", config };
+    if (!isHttpBaseUrl(rawBaseUrl)) return { status: "invalid-base-url", config };
+
+    const baseUrl = normalizeImportedBaseUrl(rawBaseUrl);
+    const apiKey = input.apiKey?.trim() || "";
+    const matchingIndex = config.channels.findIndex((channel) => normalizedBaseUrlKey(channel.baseUrl) === normalizedBaseUrlKey(baseUrl));
+
+    if (matchingIndex >= 0) {
+        const existing = config.channels[matchingIndex];
+        if (existing.baseUrl === baseUrl && (!apiKey || existing.apiKey === apiKey)) {
+            return { status: "updated", channelName: existing.name, config };
+        }
+        const updated = { ...existing, baseUrl, ...(apiKey ? { apiKey } : {}) };
+        const channels = config.channels.map((channel, index) => (index === matchingIndex ? updated : channel));
+        return { status: "updated", channelName: existing.name, config: { ...config, channels } };
+    }
+
+    const channel = createModelChannel({
+        name: importedChannelName(baseUrl),
+        baseUrl,
+        apiKey,
+        apiFormat: "openai",
+        models: [],
+    });
+    return { status: "created", channelName: channel.name, config: { ...config, channels: [...config.channels, channel] } };
+}
+
+function isHttpBaseUrl(baseUrl: string) {
+    try {
+        const url = new URL(baseUrl);
+        return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.hostname);
+    } catch {
+        return false;
+    }
+}
+
+function normalizedBaseUrlKey(baseUrl: string) {
+    try {
+        return stripTrailingApiVersion(normalizeImportedBaseUrl(baseUrl));
+    } catch {
+        return stripTrailingApiVersion(baseUrl.trim().replace(/\/+$/, ""));
+    }
+}
+
+function normalizeImportedBaseUrl(baseUrl: string) {
+    const url = new URL(baseUrl.trim());
+    url.hash = "";
+    return url.toString().replace(/\/+$/, "");
+}
+
+function stripTrailingApiVersion(baseUrl: string) {
+    return baseUrl.replace(/\/v1$/i, "");
+}
+
+function importedChannelName(baseUrl: string) {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname.replace(/^(?:www|api)\./i, "") || i18n.t("config.channels.newName");
+}
+
 export function encodeChannelModel(channelId: string, model: string) {
     return `${channelId}${CHANNEL_MODEL_SEPARATOR}${model.trim()}`;
 }
@@ -338,12 +391,10 @@ export function decodeChannelModel(value: string) {
 }
 
 export function modelOptionName(value: string) {
-    if (isComfyUiModelValue(value)) return value;
     return decodeChannelModel(value)?.model || value;
 }
 
 export function modelOptionLabel(config: AiConfig, value: string) {
-    if (isComfyUiModelValue(value)) return comfyUiModelLabel(getComfyUiServices(), value);
     const decoded = decodeChannelModel(value);
     if (!decoded) return value;
     const channel = config.channels.find((item) => item.id === decoded.channelId);
@@ -357,7 +408,6 @@ export function modelOptionsFromChannels(channels: ModelChannel[]) {
 export function normalizeModelOptionValue(value: string | undefined, channels: ModelChannel[]) {
     const model = (value || "").trim();
     if (!model) return "";
-    if (isComfyUiModelValue(model)) return model;
     const decoded = decodeChannelModel(model);
     if (decoded) {
         const channel = channels.find((item) => item.id === decoded.channelId);
@@ -368,17 +418,6 @@ export function normalizeModelOptionValue(value: string | undefined, channels: M
 }
 
 export function resolveModelChannel(config: AiConfig, value: string) {
-    const comfyMatch = findComfyUiWorkflow(getComfyUiServices(), value);
-    if (comfyMatch) {
-        return {
-            id: comfyMatch.service.id,
-            name: comfyMatch.service.name,
-            baseUrl: comfyMatch.service.baseUrl,
-            apiKey: comfyMatch.service.apiKey,
-            apiFormat: "openai" as const,
-            models: [{ name: value, capability: comfyMatch.workflow.capability }],
-        };
-    }
     const decoded = decodeChannelModel(value);
     const model = decoded?.model || value;
     const matched = decoded ? config.channels.find((channel) => channel.id === decoded.channelId) : config.channels.find((channel) => channel.models.some((item) => item.name === model));
@@ -389,7 +428,7 @@ export function resolveModelRequestConfig(config: AiConfig, value: string) {
     const channel = resolveModelChannel(config, value);
     return {
         ...config,
-        model: isComfyUiModelValue(value) ? value : modelOptionName(value || config.model),
+        model: modelOptionName(value || config.model),
         baseUrl: channel.baseUrl,
         apiKey: channel.apiKey,
         apiFormat: channel.apiFormat,
@@ -418,17 +457,6 @@ function normalizeChannels(config: AiConfig) {
             }),
         );
     }
-    const comfyIndex = channels.findIndex((channel) => channel.id === COMFYUI_CHANNEL_ID);
-    if (comfyIndex < 0) {
-        channels.push(comfyUiChannel());
-    } else {
-        const channel = channels[comfyIndex];
-        const modelIndex = channel.models.findIndex((model) => model.name === COMFYUI_MINIMAX_H3_MODEL);
-        const models = [...channel.models];
-        if (modelIndex < 0) models.push(comfyUiChannel().models[0]);
-        else models[modelIndex] = { ...models[modelIndex], capability: "video", script: getComfyUiMinimaxH3Script() };
-        channels[comfyIndex] = { ...channel, models };
-    }
     return channels;
 }
 
@@ -449,5 +477,20 @@ export function buildApiUrl(baseUrl: string, path: string) {
     const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     const apiBaseUrl = lowerBaseUrl.endsWith("/v1") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
-    return `${apiBaseUrl}${path}`;
+    return withLocalProxy(`${apiBaseUrl}${path}`);
+}
+
+export function normalizeLocalProxyUrl(value: string) {
+    const trimmed = value.trim().replace(/\/+$/, "");
+    if (!trimmed) return "";
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+}
+
+/** Prefix an outgoing request with the local forwarding proxy so the browser is not blocked by CORS. */
+export function withLocalProxy(url: string) {
+    const { proxyEnabled, proxyUrl } = useConfigStore.getState().config;
+    if (!proxyEnabled || !/^https?:\/\//i.test(url)) return url;
+    const base = normalizeLocalProxyUrl(proxyUrl);
+    if (!base || url.startsWith(`${base}/`)) return url;
+    return `${base}/${url}`;
 }
