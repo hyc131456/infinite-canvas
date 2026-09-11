@@ -40,7 +40,7 @@ export function referenceUrl(image: ReferenceImage) {
     return image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
 }
 
-export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeMetadata {
+export function buildImageGenerationMetadata(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[], comfyUiParameterBindings?: Record<string, string[]>): CanvasNodeMetadata {
     return {
         generationType: type,
         model: config.model,
@@ -48,6 +48,7 @@ export function buildImageGenerationMetadata(type: CanvasImageGenerationType, co
         quality: config.quality,
         negativePrompt: config.negativePrompt,
         comfyUiParams: config.comfyUiParams?.[config.model],
+        ...(comfyUiParameterBindings && Object.keys(comfyUiParameterBindings).length ? { comfyUiParameterBindings } : {}),
         ...(config.background ? { background: config.background } : {}),
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),

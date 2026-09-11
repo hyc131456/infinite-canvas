@@ -61,6 +61,7 @@ export type CanvasNodeMetadata = {
     quality?: string;
     negativePrompt?: string;
     comfyUiParams?: Record<string, ComfyUiParamValue>;
+    comfyUiParameterBindings?: Record<string, string[]>;
     background?: string;
     count?: number;
     textCount?: number;
@@ -89,7 +90,7 @@ export type CanvasNodeMetadata = {
     bytes?: number;
     durationMs?: number;
     videoTaskId?: string;
-    videoTaskProvider?: "openai" | "gemini";
+    videoTaskProvider?: "openai" | "gemini" | "comfyui" | "plugin";
     groupId?: string;
     interactive?: boolean; // Plugin node interaction/move state; see CanvasNodeDefinition.interactionToggle.
 };
@@ -108,6 +109,8 @@ export type CanvasConnection = {
     id: string;
     fromNodeId: string;
     toNodeId: string;
+    /** Optional explicit parameter key when the target is a custom ComfyUI workflow. */
+    parameterKey?: string;
 };
 
 export type CanvasAssistantReference = {

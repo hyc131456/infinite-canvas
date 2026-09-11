@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes, getGroupResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import type { ComfyUiParamValue, ComfyUiParameter, ComfyUiWorkflow } from "@/types/comfyui";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -37,8 +38,93 @@ type NodeGenerationGroupInput = {
 
 export type NodeGenerationInput = NodeGenerationResourceInput | NodeGenerationGroupInput;
 
-export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string): NodeGenerationContext {
-    const inputs = buildNodeGenerationInputs(nodeId, nodes, connections);
+export type ComfyUiConnectionParameterError = {
+    code: "missingParameter" | "unsupportedSource" | "conflict" | "invalidNumber" | "invalidBoolean" | "invalidOption" | "outOfRange";
+    key: string;
+    label: string;
+    sourceNodeIds: string[];
+};
+
+export type ComfyUiConnectionParameterResult = {
+    values: Record<string, ComfyUiParamValue>;
+    bindings: Record<string, string[]>;
+    excludedNodeIds: Set<string>;
+    errors: ComfyUiConnectionParameterError[];
+};
+
+export function findMissingComfyUiRequiredParameter(workflow: ComfyUiWorkflow, values: Record<string, ComfyUiParamValue> | undefined, prompt: string) {
+    return workflow.parameters.find((parameter) => {
+        if (!parameter.required) return false;
+        const value = parameter.key === "prompt" ? prompt : values?.[parameter.key] ?? parameter.defaultValue;
+        return value === undefined || (typeof value === "string" && !value.trim());
+    });
+}
+
+export function buildComfyUiConnectionParameterValues(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], workflow: ComfyUiWorkflow): ComfyUiConnectionParameterResult {
+    const parametersByKey = new Map(workflow.parameters.map((parameter) => [parameter.key, parameter]));
+    const grouped = new Map<string, { parameter: ComfyUiParameter; values: string[]; sourceNodeIds: string[] }>();
+    const resolvedValues: Record<string, ComfyUiParamValue> = {};
+    const bindings: Record<string, string[]> = {};
+    const excludedNodeIds = new Set<string>();
+    const errors: ComfyUiConnectionParameterError[] = [];
+
+    connections
+        .filter((connection) => connection.toNodeId === nodeId && Boolean(connection.parameterKey))
+        .forEach((connection) => {
+            const key = connection.parameterKey!;
+            const parameter = parametersByKey.get(key);
+            const source = nodes.find((node) => node.id === connection.fromNodeId);
+            if (!parameter) {
+                errors.push({ code: "missingParameter", key, label: key, sourceNodeIds: [connection.fromNodeId] });
+                return;
+            }
+            if (!source || source.type !== CanvasNodeType.Text) {
+                errors.push({ code: "unsupportedSource", key, label: parameter.label, sourceNodeIds: [connection.fromNodeId] });
+                return;
+            }
+
+            excludedNodeIds.add(source.id);
+            const current = grouped.get(key) || { parameter, values: [], sourceNodeIds: [] };
+            current.values.push(source.metadata?.content || source.metadata?.prompt || "");
+            current.sourceNodeIds.push(source.id);
+            grouped.set(key, current);
+        });
+
+    grouped.forEach(({ parameter, values: sourceValues, sourceNodeIds }, key) => {
+        bindings[key] = sourceNodeIds;
+        const valueType = parameter.bindings[0]?.valueType || parameterValueType(parameter);
+        const nonEmptyValues = sourceValues.map((value) => value.trim()).filter(Boolean);
+        if (valueType === "string") {
+            if (nonEmptyValues.length) return void (resolvedValues[key] = nonEmptyValues.join("\n\n"));
+            return;
+        }
+        if (sourceNodeIds.length > 1) {
+            errors.push({ code: "conflict", key, label: parameter.label, sourceNodeIds });
+            return;
+        }
+        const value = nonEmptyValues[0];
+        if (!value) return;
+        if (valueType === "number") {
+            const number = Number(value);
+            if (!Number.isFinite(number)) errors.push({ code: "invalidNumber", key, label: parameter.label, sourceNodeIds });
+            else if ((parameter.min !== undefined && number < parameter.min) || (parameter.max !== undefined && number > parameter.max)) errors.push({ code: "outOfRange", key, label: parameter.label, sourceNodeIds });
+            else resolvedValues[key] = number;
+            return;
+        }
+        if (valueType === "boolean") {
+            if (!/^(true|false)$/i.test(value)) errors.push({ code: "invalidBoolean", key, label: parameter.label, sourceNodeIds });
+            else resolvedValues[key] = value.toLowerCase() === "true";
+            return;
+        }
+        if (parameter.options?.length && !parameter.options.some((option) => String(option.value) === value)) errors.push({ code: "invalidOption", key, label: parameter.label, sourceNodeIds });
+        else resolvedValues[key] = value;
+    });
+
+    return { values: resolvedValues, bindings, excludedNodeIds, errors };
+}
+
+export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[], prompt: string, excludedNodeIds: ReadonlySet<string> = new Set()): NodeGenerationContext {
+    const inputs = filterGenerationInputs(buildNodeGenerationInputs(nodeId, nodes, connections), excludedNodeIds);
     const sourceNode = nodes.find((node) => node.id === nodeId);
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
         return buildComposerGenerationContext(inputs, prompt, sourceNode.metadata.referenceNodeIds || (sourceNode.metadata.referenceNodeId ? [sourceNode.metadata.referenceNodeId] : []));
@@ -61,6 +147,23 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         videoCount: referenceVideos.length,
         audioCount: referenceAudios.length,
     };
+}
+
+function filterGenerationInputs(inputs: NodeGenerationInput[], excludedNodeIds: ReadonlySet<string>) {
+    if (!excludedNodeIds.size) return inputs;
+    return inputs.flatMap((input) => {
+        if (input.type === "group") {
+            const children = input.children.filter((child) => !excludedNodeIds.has(child.nodeId));
+            return children.length ? [{ ...input, children }] : [];
+        }
+        return excludedNodeIds.has(input.nodeId) ? [] : [input];
+    });
+}
+
+function parameterValueType(parameter: ComfyUiParameter) {
+    if (parameter.type === "number" || parameter.type === "seed") return "number" as const;
+    if (parameter.type === "boolean") return "boolean" as const;
+    return parameter.type === "select" ? "enum" as const : "string" as const;
 }
 
 function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, referenceNodeIds: string[] = []): NodeGenerationContext {

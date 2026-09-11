@@ -45,13 +45,43 @@ export async function runComfyUiImageWorkflow(model: string, prompt: string, par
     }
 }
 
+export async function createComfyUiVideoTask(model: string, prompt: string, params: Record<string, ComfyUiParamValue>, options?: RequestOptions) {
+    try {
+        const match = findComfyUiWorkflow(getComfyUiServices(), model);
+        if (!match) throw new Error("找不到对应的 ComfyUI 工作流，请重新选择模型");
+        if (match.workflow.capability !== "video") throw new Error("当前 ComfyUI 工作流不是视频工作流");
+        const values = comfyUiWorkflowParams(match.workflow, { ...params, prompt });
+        return await queuePrompt(match.service, applyParameterValues(match.workflow, values), options);
+    } catch (error) {
+        throw comfyError(error, "ComfyUI 视频工作流提交失败");
+    }
+}
+
+export async function pollComfyUiVideoTask(model: string, promptId: string, options?: RequestOptions) {
+    try {
+        const match = findComfyUiWorkflow(getComfyUiServices(), model);
+        if (!match) throw new Error("找不到对应的 ComfyUI 工作流，请重新选择模型");
+        const payload = await comfyRequest<Record<string, ComfyUiHistoryEntry> | ComfyUiHistoryEntry>(match.service, "get", `/history/${encodeURIComponent(promptId)}`, undefined, options);
+        const entry = isHistoryEntry(payload) ? payload : payload[promptId];
+        if (entry?.status?.status_str === "error" || entry?.status?.status_str === "failed") return { status: "failed" as const, error: readHistoryError(entry) || "ComfyUI 执行失败" };
+        if (!entry?.status?.completed) return { status: "pending" as const };
+        const outputs = await readVideoOutputs(match.service, entry, match.workflow.outputs.map((item) => item.nodeId), options);
+        if (!outputs.length) return { status: "failed" as const, error: "ComfyUI 已完成任务，但没有找到视频输出" };
+        return { status: "completed" as const, result: { blob: outputs[0].blob } };
+    } catch (error) {
+        throw comfyError(error, "ComfyUI 视频工作流查询失败");
+    }
+}
+
 export async function testComfyUiWorkflow(service: ComfyUiService, workflow: ComfyUiWorkflow, params: Record<string, ComfyUiParamValue>, options?: RequestOptions) {
     try {
         const values = comfyUiWorkflowParams(workflow, params);
         const promptId = await queuePrompt(service, applyParameterValues(workflow, values), options);
         const history = await pollHistory(service, promptId, options);
-        const outputs = await readImageOutputs(service, history, workflow.outputs.map((item) => item.nodeId), options);
-        if (!outputs.length) throw new Error("测试完成，但没有找到配置的图片输出节点");
+        const outputs = workflow.capability === "video"
+            ? await readVideoOutputs(service, history, workflow.outputs.map((item) => item.nodeId), options)
+            : await readImageOutputs(service, history, workflow.outputs.map((item) => item.nodeId), options);
+        if (!outputs.length) throw new Error(`测试完成，但没有找到配置的${workflow.capability === "video" ? "视频" : "图片"}输出节点`);
         return outputs;
     } catch (error) {
         throw comfyError(error, "ComfyUI 工作流测试失败");
@@ -115,6 +145,27 @@ async function readImageOutputs(service: ComfyUiService, history: ComfyUiHistory
         const blob = await comfyRequest<Blob>(service, "get", `/view?${params.toString()}`, undefined, options, "blob");
         return { id: nanoid(), dataUrl: await blobToDataUrl(blob) };
     })).then((items) => items.filter((item): item is { id: string; dataUrl: string } => Boolean(item)));
+}
+
+async function readVideoOutputs(service: ComfyUiService, history: ComfyUiHistoryEntry, outputNodeIds: string[], options?: RequestOptions) {
+    const outputs = history.outputs || {};
+    const entries = outputNodeIds.flatMap((nodeId) => ["videos", "gifs", "images"].flatMap((key) => Array.isArray(outputs[nodeId]?.[key]) ? outputs[nodeId][key] as Array<Record<string, unknown>> : [])).filter(isVideoOutputEntry);
+    return Promise.all(entries.map(async (entry) => {
+        const blob = await readOutputBlob(service, entry, "video/mp4", options);
+        return { id: nanoid(), dataUrl: await blobToDataUrl(blob), blob };
+    }));
+}
+
+function isVideoOutputEntry(entry: Record<string, unknown>) {
+    return [entry.filename, entry.format].some((value) => typeof value === "string" && (/\.(mp4|webm|mov|gif)(\?|#|$)/i.test(value) || value.toLowerCase().startsWith("video/")));
+}
+
+async function readOutputBlob(service: ComfyUiService, entry: Record<string, unknown>, fallbackMimeType: string, options?: RequestOptions) {
+    const filename = typeof entry.filename === "string" ? entry.filename : "";
+    if (!filename) throw new Error("ComfyUI 输出缺少文件名");
+    const params = new URLSearchParams({ filename, subfolder: typeof entry.subfolder === "string" ? entry.subfolder : "", type: typeof entry.type === "string" ? entry.type : "output" });
+    const blob = await comfyRequest<Blob>(service, "get", `/view?${params.toString()}`, undefined, options, "blob");
+    return blob.type.startsWith(fallbackMimeType.split("/")[0] + "/") ? blob : new Blob([blob], { type: fallbackMimeType });
 }
 
 async function comfyRequest<T = unknown>(service: Pick<ComfyUiService, "baseUrl" | "apiKey">, method: "get" | "post", path: string, data?: unknown, options?: RequestOptions, responseType: "json" | "blob" = "json") {

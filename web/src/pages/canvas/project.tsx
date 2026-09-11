@@ -9,6 +9,7 @@ import { requestEdit, requestGeneration, requestImageQuestion } from "@/services
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { findComfyUiWorkflow, isComfyUiModelValue, useComfyUiStore } from "@/stores/use-comfyui-store";
 import { uploadImage } from "@/services/image-storage";
 import { uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -31,7 +32,7 @@ import { CanvasNodeCropDialog, type CanvasImageCropRect } from "@/components/can
 import { CanvasNodeMaskEditDialog, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
-import { buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, hydrateNodeGenerationContext, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
+import { buildComfyUiConnectionParameterValues, buildNodeGenerationContext, buildNodeGenerationInputs, buildNodeResponseMessages, findMissingComfyUiRequiredParameter, hydrateNodeGenerationContext, type ComfyUiConnectionParameterResult, type NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeHoverToolbar, CanvasNodeInfoModal } from "@/components/canvas/canvas-node-hover-toolbar";
 import { CanvasSelectionToolbar } from "@/components/canvas/canvas-selection-toolbar";
 import { InfiniteCanvas } from "@/components/canvas/infinite-canvas";
@@ -200,6 +201,7 @@ function InfiniteCanvasPage() {
 
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
+    const comfyUiServices = useComfyUiStore((state) => state.services);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const addAsset = useAssetStore((state) => state.addAsset);
@@ -305,9 +307,7 @@ function InfiniteCanvasPage() {
     const completeVideoNodeTask = useCallback(
         async (nodeId: string, config: Parameters<typeof buildGenerationConfig>[0], prompt: string, images: Parameters<typeof createVideoGenerationTask>[2], signal: AbortSignal, extra: CanvasNodeData["metadata"] = {}, videos: ReferenceVideo[] = [], audios: ReferenceAudio[] = []) => {
             const task = await createVideoGenerationTask(config, prompt, images, { signal, videos, audios });
-            if (task.provider !== "plugin") {
-                setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: task.provider === "gemini" ? "gemini" : "openai", model: config.model } } : item)));
-            }
+            setNodes((prev) => prev.map((item) => (item.id === nodeId ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskProvider: task.provider, model: config.model } } : item)));
             const video = await storeGeneratedVideo(await waitForVideoGenerationTask(config, task, { signal }));
             setNodes((prev) => prev.map((item) => (item.id === nodeId ? applyGeneratedVideo(item, video, { prompt, model: config.model, ...extra }) : item)));
         },
@@ -331,9 +331,10 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 setRunningNodeId(node.id);
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
+                const provider = isComfyUiModelValue(generationConfig.model) ? "comfyui" : node.metadata?.videoTaskProvider || "openai";
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, videoTaskProvider: provider, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item)));
                 controller = startGenerationRequest(node.id, node.id, node.id);
-                const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, { id: taskId, provider: node.metadata?.videoTaskProvider === "gemini" ? "gemini" : "openai", model: generationConfig.model }, { signal: controller.signal }));
+                const video = await storeGeneratedVideo(await waitForVideoGenerationTask(generationConfig, { id: taskId, provider, model: generationConfig.model }, { signal: controller.signal }));
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === node.id
@@ -703,6 +704,22 @@ function InfiniteCanvasPage() {
     const superResolveNode = superResolveNodeId ? nodeById.get(superResolveNodeId) || null : null;
     const angleNode = angleNodeId ? nodeById.get(angleNodeId) || null : null;
     const contextMenuNode = contextMenu?.type === "node" ? nodeById.get(contextMenu.nodeId) || null : null;
+    const contextMenuConnection = contextMenu?.type === "connection" ? connections.find((connection) => connection.id === contextMenu.connectionId) || null : null;
+    const updateConnectionParameter = useCallback((connectionId: string, parameterKey?: string) => {
+        setConnections((prev) => prev.map((connection) => connection.id === connectionId ? { ...connection, ...(parameterKey ? { parameterKey } : { parameterKey: undefined }) } : connection));
+    }, []);
+    const connectionParameterBinding = useMemo(() => {
+        if (!contextMenuConnection) return undefined;
+        const target = nodeById.get(contextMenuConnection.toNodeId);
+        const source = nodeById.get(contextMenuConnection.fromNodeId);
+        if (!target || target.type !== CanvasNodeType.Config) return { value: contextMenuConnection.parameterKey, options: [], disabled: true, disabledReason: t("canvas.connection.unsupportedModel"), onChange: () => {} };
+        if (!source || source.type !== CanvasNodeType.Text) return { value: contextMenuConnection.parameterKey, options: [], disabled: true, disabledReason: t("canvas.connection.unsupportedSource"), onChange: () => {} };
+        const model = target.metadata?.model || buildGenerationConfig(effectiveConfig, target, target.metadata?.generationMode || "image").model;
+        if (!isComfyUiModelValue(model)) return { value: contextMenuConnection.parameterKey, options: [], disabled: true, disabledReason: t("canvas.connection.unsupportedModel"), onChange: () => {} };
+        const workflow = findComfyUiWorkflow(comfyUiServices, model)?.workflow;
+        if (!workflow) return { value: contextMenuConnection.parameterKey, options: [], disabled: true, disabledReason: t("canvas.connection.unsupportedModel"), onChange: () => {} };
+        return { value: contextMenuConnection.parameterKey, options: workflow.parameters, onChange: (value?: string) => updateConnectionParameter(contextMenuConnection.id, value) };
+    }, [comfyUiServices, contextMenuConnection, effectiveConfig, nodeById, t, updateConnectionParameter]);
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const previewContent = previewImageId ? previewNode?.metadata?.images?.find((image) => image.id === previewImageId)?.content : previewNode?.metadata?.content;
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
@@ -2277,7 +2294,32 @@ function InfiniteCanvasPage() {
     const handleGenerateNode = useCallback(
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
-            const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            const baseGenerationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            const isComfyUiModel = sourceNode?.type === CanvasNodeType.Config && isComfyUiModelValue(baseGenerationConfig.model);
+            const comfyWorkflow = isComfyUiModel ? findComfyUiWorkflow(comfyUiServices, baseGenerationConfig.model)?.workflow : undefined;
+            if (isComfyUiModel && !comfyWorkflow) {
+                message.error(t("canvas.connection.errors.workflowMissing"));
+                return;
+            }
+            const connectionParameters: ComfyUiConnectionParameterResult = comfyWorkflow
+                ? buildComfyUiConnectionParameterValues(nodeId, nodesRef.current, connectionsRef.current, comfyWorkflow)
+                : { values: {}, bindings: {}, excludedNodeIds: new Set<string>(), errors: [] };
+            if (connectionParameters.errors.length) {
+                const error = connectionParameters.errors[0];
+                const messageKey = `canvas.connection.errors.${error.code}`;
+                message.error(t(messageKey, { key: error.key, label: error.label }));
+                return;
+            }
+            const generationConfig = comfyWorkflow
+                ? {
+                      ...baseGenerationConfig,
+                      negativePrompt: typeof connectionParameters.values.negativePrompt === "string" ? connectionParameters.values.negativePrompt : baseGenerationConfig.negativePrompt,
+                      comfyUiParams: {
+                          ...baseGenerationConfig.comfyUiParams,
+                          [baseGenerationConfig.model]: { ...(baseGenerationConfig.comfyUiParams?.[baseGenerationConfig.model] || {}), ...connectionParameters.values },
+                      },
+                  }
+                : baseGenerationConfig;
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
@@ -2321,10 +2363,20 @@ function InfiniteCanvasPage() {
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
             const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt),
+                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, typeof connectionParameters.values.prompt === "string" ? connectionParameters.values.prompt : editingTextNode ? t("canvas.projectPage.editTextPrompt", { source: sourceTextContent, prompt }) : prompt, connectionParameters.excludedNodeIds),
             );
             const effectivePrompt = generationContext.prompt.trim();
             if (runController.signal.aborted) {
+                finishGenerationRequest(nodeId, runController);
+                setRunningNodeId(null);
+                return;
+            }
+            const validationValues = generationConfig.negativePrompt?.trim()
+                ? { ...generationConfig.comfyUiParams?.[generationConfig.model], negativePrompt: generationConfig.negativePrompt }
+                : generationConfig.comfyUiParams?.[generationConfig.model];
+            const missingRequiredParameter = comfyWorkflow ? findMissingComfyUiRequiredParameter(comfyWorkflow, validationValues, effectivePrompt) : undefined;
+            if (missingRequiredParameter) {
+                message.error(t("canvas.connection.errors.required", { label: missingRequiredParameter.label }));
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
                 return;
@@ -2350,7 +2402,7 @@ function InfiniteCanvasPage() {
                             : [];
                     const referenceImages = [...new Map([...sourceReference, ...generationContext.referenceImages].map((image) => [image.id, image])).values()];
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
-                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages);
+                    const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages, connectionParameters.bindings);
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
                     const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -2704,7 +2756,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, comfyUiServices, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -2719,24 +2771,62 @@ function InfiniteCanvasPage() {
             const sourceNode = findRetrySourceNode(node.id, nodesRef.current, connectionsRef.current) || node;
             const savedImageMetadata = node.type === CanvasNodeType.Image ? node.metadata : undefined;
             const hasSavedImageMetadata = Boolean(savedImageMetadata?.generationType);
+            const savedModel = savedImageMetadata?.model || effectiveConfig.imageModel || effectiveConfig.model;
+            const retryMode = node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image";
+            const baseRetryConfig = { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), count: "1" };
+            const isComfyUiModel = !hasSavedImageMetadata && sourceNode.type === CanvasNodeType.Config && isComfyUiModelValue(baseRetryConfig.model);
+            const retryWorkflow = isComfyUiModel ? findComfyUiWorkflow(comfyUiServices, baseRetryConfig.model)?.workflow : undefined;
+            if (isComfyUiModel && !retryWorkflow) {
+                message.error(t("canvas.connection.errors.workflowMissing"));
+                return;
+            }
+            const retryConnectionParameters: ComfyUiConnectionParameterResult = retryWorkflow
+                ? buildComfyUiConnectionParameterValues(sourceNode.id, nodesRef.current, connectionsRef.current, retryWorkflow)
+                : { values: {}, bindings: {}, excludedNodeIds: new Set<string>(), errors: [] };
+            if (retryConnectionParameters.errors.length) {
+                const error = retryConnectionParameters.errors[0];
+                const messageKey = `canvas.connection.errors.${error.code}`;
+                message.error(t(messageKey, { key: error.key, label: error.label }));
+                return;
+            }
             const generationConfig =
                 hasSavedImageMetadata && savedImageMetadata
                     ? {
                           ...effectiveConfig,
-                          model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
+                          model: savedModel,
                           quality: savedImageMetadata.quality || effectiveConfig.quality,
+                          negativePrompt: savedImageMetadata.negativePrompt ?? effectiveConfig.negativePrompt,
                           size: savedImageMetadata.size || effectiveConfig.size,
                           background: savedImageMetadata.background ?? effectiveConfig.background,
+                          comfyUiParams: savedImageMetadata.comfyUiParams ? { ...effectiveConfig.comfyUiParams, [savedModel]: savedImageMetadata.comfyUiParams } : effectiveConfig.comfyUiParams,
                           count: "1",
                       }
-                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image"), count: "1" };
+                    : retryWorkflow
+                      ? {
+                            ...baseRetryConfig,
+                            negativePrompt: typeof retryConnectionParameters.values.negativePrompt === "string" ? retryConnectionParameters.values.negativePrompt : baseRetryConfig.negativePrompt,
+                            comfyUiParams: {
+                                ...baseRetryConfig.comfyUiParams,
+                                [baseRetryConfig.model]: { ...(baseRetryConfig.comfyUiParams?.[baseRetryConfig.model] || {}), ...retryConnectionParameters.values },
+                            },
+                        }
+                      : baseRetryConfig;
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 openConfigDialog(true);
                 return;
             }
 
-            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, sourceNode.metadata?.prompt || node.metadata?.prompt || ""));
+            const retryPrompt = typeof retryConnectionParameters.values.prompt === "string" ? retryConnectionParameters.values.prompt : sourceNode.metadata?.prompt || node.metadata?.prompt || "";
+            const context = hasSavedImageMetadata ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, retryPrompt, retryConnectionParameters.excludedNodeIds));
             const prompt = (savedImageMetadata?.prompt || context?.prompt || "").trim();
+            const validationValues = generationConfig.negativePrompt?.trim()
+                ? { ...generationConfig.comfyUiParams?.[generationConfig.model], negativePrompt: generationConfig.negativePrompt }
+                : generationConfig.comfyUiParams?.[generationConfig.model];
+            const missingRequiredParameter = retryWorkflow ? findMissingComfyUiRequiredParameter(retryWorkflow, validationValues, prompt) : undefined;
+            if (missingRequiredParameter) {
+                message.error(t("canvas.connection.errors.required", { label: missingRequiredParameter.label }));
+                return;
+            }
             if (!prompt) {
                 message.warning(t("canvas.projectPage.retryPromptMissing"));
                 return;
@@ -2810,11 +2900,14 @@ function InfiniteCanvasPage() {
                           model: generationConfig.model,
                           size: generationConfig.size,
                           quality: generationConfig.quality,
+                          negativePrompt: generationConfig.negativePrompt,
+                          comfyUiParams: generationConfig.comfyUiParams?.[generationConfig.model],
+                          comfyUiParameterBindings: savedImageMetadata.comfyUiParameterBindings,
                           ...(generationConfig.background ? { background: generationConfig.background } : {}),
                           count: savedImageMetadata.count || 1,
                           references: savedImageMetadata.references,
                       }
-                    : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
+                    : buildImageGenerationMetadata(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages, retryConnectionParameters.bindings);
                 setNodes((prev) =>
                     prev.map((item) => {
                         if (item.id !== node.id) return item;
@@ -2861,7 +2954,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
+        [completeVideoNodeTask, comfyUiServices, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {
@@ -3302,6 +3395,7 @@ function InfiniteCanvasPage() {
                         canCaptureVideoFrame={contextMenuNode?.type === CanvasNodeType.Video && Boolean(contextMenuNode.metadata?.content)}
                         canGroup={contextMenu.type === "node" && canGroupSelection}
                         canUngroup={contextMenu.type === "node" && canUngroupSelection}
+                        parameterBinding={connectionParameterBinding}
                         onClose={() => setContextMenu(null)}
                         onCaptureVideoFrame={(position) => {
                             if (contextMenu.type !== "node") return;

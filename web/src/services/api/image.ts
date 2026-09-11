@@ -721,7 +721,19 @@ function parseGeminiImagePayload(payload: GeminiPayload) {
 }
 
 export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
-    const requestConfig = resolveModelRequestConfig(config, config.model || config.imageModel);
+    const model = config.model || config.imageModel;
+    if (isComfyUiModelValue(model)) {
+        const requestSize = resolveRequestSize(normalizeQuality(config.quality), config.size);
+        const size = requestSize ? parseImageDimensions(requestSize) : null;
+        const workflowParams = config.comfyUiParams?.[model] || {};
+        const negativePrompt = config.negativePrompt?.trim() || workflowParams.negativePrompt;
+        return runComfyUiImageWorkflow(model, prompt, {
+            ...workflowParams,
+            ...(negativePrompt !== undefined && negativePrompt !== "" ? { negativePrompt } : {}),
+            ...(size ? { width: workflowParams.width ?? size.width, height: workflowParams.height ?? size.height } : {}),
+        }, options);
+    }
+    const requestConfig = resolveModelRequestConfig(config, model);
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const script = resolveModelScript(config, config.model || config.imageModel);
     if (script) {

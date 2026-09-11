@@ -28,7 +28,7 @@ if (images.length) throw new Error("ComfyUI Z-Image 工作流暂不支持参考�
 function createRunId() {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
-    : \`\\${Date.now()}-\\${Math.random().toString(36).slice(2)}\`;
+    : \`\${Date.now()}-\${Math.random().toString(36).slice(2)}\`;
 }
 
 function readDimensions() {
@@ -74,11 +74,11 @@ async function runOnce(index) {
   workflow["5"].inputs.height = dimensions.height;
   workflow["5"].inputs.batch_size = 1;
   workflow["1"].inputs.seed = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
-  workflow["11"].inputs.filename_prefix = \`InfiniteCanvas/Z-Image-\\${runId}-\\${index + 1}\`;
+  workflow["11"].inputs.filename_prefix = \`InfiniteCanvas/Z-Image-\${runId}-\${index + 1}\`;
 
   const queued = await request({
     method: "post",
-    url: \`\\${comfyUrl}/prompt\`,
+    url: \`\${comfyUrl}/prompt\`,
     headers: { "Content-Type": "application/json" },
     data: { prompt: workflow, client_id: runId },
   });
@@ -88,7 +88,7 @@ async function runOnce(index) {
   }
 
   const imageFile = await poll(
-    () => request({ method: "get", url: \`${comfyUrl}/history/\\${queued.prompt_id}\` }),
+    () => request({ method: "get", url: \`\${comfyUrl}/history/\${queued.prompt_id}\` }),
     (history) => {
       const entry = history?.[queued.prompt_id];
       if (entry?.status?.status_str === "error") throw new Error(executionError(entry));
@@ -101,7 +101,7 @@ async function runOnce(index) {
   );
   const blob = await request({
     method: "get",
-    url: \`${comfyUrl}/view\`,
+    url: \`\${comfyUrl}/view\`,
     params: { filename: imageFile.filename, subfolder: imageFile.subfolder || "", type: imageFile.type || "output" },
     responseType: "blob",
   });

@@ -2,8 +2,6 @@ import { nanoid } from "nanoid";
 
 import type { ComfyUiCapability, ComfyUiInputBinding, ComfyUiNode, ComfyUiOutputBinding, ComfyUiParameter, ComfyUiWorkflow } from "@/types/comfyui";
 
-type RawWorkflow = Record<string, { class_type?: unknown; inputs?: unknown; _meta?: unknown }>;
-
 export function parseComfyUiWorkflow(value: unknown, options?: { name?: string; capability?: ComfyUiCapability }) {
     if (!isRecord(value) || !Object.keys(value).length) throw new Error("ComfyUI 工作流必须是非空对象");
     const workflow = Object.entries(value).reduce<Record<string, ComfyUiNode>>((result, [nodeId, node]) => {
@@ -15,7 +13,7 @@ export function parseComfyUiWorkflow(value: unknown, options?: { name?: string; 
         };
         return result;
     }, {});
-    const capability = options?.capability || "image";
+    const capability = options?.capability || detectCapability(workflow);
     const now = new Date().toISOString();
     return {
         id: nanoid(),
@@ -23,7 +21,7 @@ export function parseComfyUiWorkflow(value: unknown, options?: { name?: string; 
         capability,
         workflow,
         parameters: detectParameters(workflow),
-        outputs: detectOutputs(workflow, capability),
+        outputs: detectComfyUiOutputs(workflow, capability),
         createdAt: now,
         updatedAt: now,
     } satisfies ComfyUiWorkflow;
@@ -34,9 +32,12 @@ export function validateComfyUiWorkflow(workflow: ComfyUiWorkflow) {
     if (!Object.keys(workflow.workflow).length) return "工作流不能为空";
     const keys = new Set<string>();
     for (const parameter of workflow.parameters) {
-        if (!/^[a-zA-Z0-9_-]+$/.test(parameter.key)) return `参数 ${parameter.label || parameter.key} 的机器名无效`;
+        if (!/^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(parameter.key)) return `参数 ${parameter.label || parameter.key} 的机器名无效`;
         if (keys.has(parameter.key)) return `参数机器名重复：${parameter.key}`;
         keys.add(parameter.key);
+        if ((parameter.type === "number" || parameter.type === "seed") && parameter.min !== undefined && parameter.max !== undefined && parameter.min > parameter.max) return `参数 ${parameter.label} 的最小值不能大于最大值`;
+        if ((parameter.type === "number" || parameter.type === "seed") && parameter.step !== undefined && (!Number.isFinite(parameter.step) || parameter.step <= 0)) return `参数 ${parameter.label} 的步进必须大于 0`;
+        if (parameter.type === "select" && !parameter.options?.length) return `参数 ${parameter.label} 至少需要一个选项`;
         for (const binding of parameter.bindings) {
             const node = workflow.workflow[binding.nodeId];
             if (!node) return `参数 ${parameter.label} 绑定的节点 ${binding.nodeId} 不存在`;
@@ -84,10 +85,24 @@ function detectParameters(workflow: Record<string, ComfyUiNode>): ComfyUiParamet
     return parameters;
 }
 
-function detectOutputs(workflow: Record<string, ComfyUiNode>, capability: ComfyUiCapability): ComfyUiOutputBinding[] {
+export function detectComfyUiOutputs(workflow: Record<string, ComfyUiNode>, capability: ComfyUiCapability): ComfyUiOutputBinding[] {
     return Object.entries(workflow)
-        .filter(([, node]) => capability === "image" ? /saveimage|previewimage/i.test(node.class_type) : /savevideo|videocombine|vhs_videocombine/i.test(node.class_type))
+        .filter(([, node]) => capability === "image" ? isImageOutputNode(node) : isComfyUiVideoOutputNode(node))
         .map(([nodeId, node]) => ({ nodeId, type: capability, filenameKey: typeof node.inputs.filename_prefix === "string" ? "filename_prefix" : undefined }));
+}
+
+function detectCapability(workflow: Record<string, ComfyUiNode>): ComfyUiCapability {
+    return Object.values(workflow).some(isComfyUiVideoOutputNode) ? "video" : "image";
+}
+
+function isImageOutputNode(node: ComfyUiNode) {
+    return /saveimage|previewimage/i.test(node.class_type);
+}
+
+export function isComfyUiVideoOutputNode(node: ComfyUiNode) {
+    const title = typeof node._meta?.title === "string" ? node._meta.title : "";
+    return /savevideo|videocombine|vhs_videocombine/i.test(`${node.class_type} ${title}`)
+        || (typeof node.inputs.format === "string" && node.inputs.format.toLowerCase().startsWith("video/"));
 }
 
 function findSamplerLinks(workflow: Record<string, ComfyUiNode>, inputKey: string) {

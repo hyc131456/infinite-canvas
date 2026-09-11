@@ -8,6 +8,8 @@
     "prompt-chip-input-plan",
     "script-assets-video-local-adaptation-prd",
     "comfyui-local-config-prd",
+    "canvas-comfyui-parameter-binding-prd",
+    "canvas-comfyui-workflow-graph-editor-prd",
     "pending-test",
     "todo"
   ]

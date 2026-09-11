@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>无限画布 - ComfyUI 工作流图形编辑器</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #f4f2ed;
+      --panel: #fbfaf7;
+      --soft: #f0eee8;
+      --field: #fffefa;
+      --text: #292524;
+      --muted: #78716c;
+      --faint: #a8a29e;
+      --line: #d6d3ca;
+      --line-strong: #b8b3a8;
+      --hover: rgba(41,37,36,.06);
+      --selected: rgba(41,37,36,.09);
+      --primary: #292524;
+      --primary-text: #fbfaf7;
+      --success: #16803c;
+      --success-bg: #edf8ef;
+      --warning: #a16207;
+      --warning-bg: #fff8df;
+      --danger: #b42318;
+      --danger-bg: #fff0ee;
+      --prompt-fill: #fff8dc;
+      --prompt-stroke: #d49b00;
+      --sampler-fill: #f2edff;
+      --sampler-stroke: #8064c8;
+      --image-fill: #eaf8ee;
+      --image-stroke: #2b9b60;
+      --input-fill: #eef4ff;
+      --input-stroke: #6185c7;
+      --shadow: 0 20px 55px rgba(50,45,38,.16);
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --canvas: #181715;
+      --panel: #1f1d1a;
+      --soft: #292524;
+      --field: #25221f;
+      --text: #f5f5f4;
+      --muted: #d6d3d1;
+      --faint: #938d86;
+      --line: #44403c;
+      --line-strong: #686158;
+      --hover: rgba(245,245,244,.07);
+      --selected: rgba(245,245,244,.12);
+      --primary: #f5f5f4;
+      --primary-text: #1f1d1a;
+      --success: #7dde9e;
+      --success-bg: rgba(34,197,94,.12);
+      --warning: #facc15;
+      --warning-bg: rgba(234,179,8,.12);
+      --danger: #fb8e86;
+      --danger-bg: rgba(239,68,68,.12);
+      --prompt-fill: #383113;
+      --prompt-stroke: #e7b616;
+      --sampler-fill: #2b2242;
+      --sampler-stroke: #a991ef;
+      --image-fill: #123624;
+      --image-stroke: #52c888;
+      --input-fill: #1e2c45;
+      --input-stroke: #85a8ee;
+      --shadow: 0 24px 70px rgba(0,0,0,.34);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { background: var(--canvas); color: var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+    .app-header { height: 56px; display: flex; align-items: center; gap: 22px; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: .01em; white-space: nowrap; }
+    .brand-mark { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--line-strong); border-radius: 7px; font-size: 15px; }
+    .crumb { min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .crumb strong { color: var(--text); font-weight: 700; }
+    .header-spacer { flex: 1; }
+    .header-actions { display: flex; align-items: center; gap: 7px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .icon-button, .plain-button { display: inline-flex; align-items: center; justify-content: center; height: 31px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); }
+    .icon-button { width: 31px; font-size: 15px; }
+    .icon-button:hover, .plain-button:hover { border-color: var(--line); background: var(--hover); color: var(--text); }
+    .plain-button { gap: 6px; padding: 0 9px; font-size: 12px; font-weight: 600; }
+    .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; padding: 0 12px; border: 1px solid var(--primary); border-radius: 6px; background: var(--primary); color: var(--primary-text); font-size: 12px; font-weight: 700; }
+    .primary-button:hover { opacity: .86; }
+
+    .editor { display: grid; grid-template-columns: 280px minmax(0, 1fr) 328px; height: calc(100vh - 56px); }
+    .sidebar, .inspector { min-width: 0; overflow: auto; background: var(--panel); }
+    .sidebar { border-right: 1px solid var(--line); padding: 18px 15px 22px; }
+    .inspector { border-left: 1px solid var(--line); padding: 16px; }
+    .graph-area { position: relative; min-width: 0; padding: 15px; background: var(--soft); }
+    .panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 9px; margin-bottom: 15px; }
+    .panel-heading h1, .panel-heading h2 { margin: 0; font-size: 15px; line-height: 1.3; font-weight: 800; }
+    .panel-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .eyebrow { color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .eyebrow + h2 { margin-top: 3px; }
+
+    .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-bottom: 16px; }
+    .summary-card { min-height: 56px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); }
+    .summary-card span { display: block; color: var(--faint); font-size: 10px; font-weight: 700; }
+    .summary-card strong { display: block; margin-top: 3px; font-size: 17px; line-height: 1; }
+    .summary-card small { color: var(--muted); font-size: 10px; }
+
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 16px 0 8px; color: var(--muted); font-size: 11px; font-weight: 800; }
+    .section-title span:last-child { color: var(--faint); font-weight: 600; }
+    .parameter-list { display: grid; gap: 7px; }
+    .parameter-row { display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 52px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+    .parameter-row:hover { border-color: var(--line-strong); background: var(--hover); }
+    .parameter-icon { display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; }
+    .parameter-copy { min-width: 0; }
+    .parameter-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .parameter-copy small { display: block; margin-top: 3px; overflow: hidden; color: var(--faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .parameter-meta { color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .parameter-meta .bound { color: var(--success); }
+    .empty-parameters { padding: 12px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--faint); font-size: 11px; line-height: 1.5; text-align: center; }
+
+    .legend { display: grid; gap: 7px; margin-top: 17px; padding-top: 13px; border-top: 1px solid var(--line); }
+    .legend-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+    .legend-dot { width: 9px; height: 9px; border: 1px solid; border-radius: 3px; }
+    .legend-dot.prompt { border-color: var(--prompt-stroke); background: var(--prompt-fill); }
+    .legend-dot.sampler { border-color: var(--sampler-stroke); background: var(--sampler-fill); }
+    .legend-dot.image { border-color: var(--image-stroke); background: var(--image-fill); }
+    .legend-dot.input { border-color: var(--input-stroke); background: var(--input-fill); }
+
+    .graph-toolbar { position: absolute; top: 28px; right: 28px; z-index: 2; display: flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--panel) 92%, transparent); box-shadow: 0 4px 15px rgba(40,36,30,.08); }
+    .graph-toolbar button, .zoom-value { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; }
+    .graph-toolbar button:hover { background: var(--hover); color: var(--text); }
+    .zoom-value { width: 46px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+    .graph-wrap { position: relative; width: 100%; height: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); cursor: grab; }
+    .graph-wrap.panning { cursor: grabbing; }
+    .graph-wrap::before { position: absolute; inset: 0; background-image: radial-gradient(var(--line) .75px, transparent .75px); background-size: 22px 22px; opacity: .42; content: ""; pointer-events: none; }
+    svg { display: block; width: 100%; height: 100%; color: var(--muted); }
+    .edge { fill: none; stroke: var(--line-strong); stroke-width: 1.7; opacity: .78; }
+    .edge.active { stroke: var(--text); stroke-width: 2.3; opacity: 1; }
+    .node { cursor: pointer; }
+    .node rect { stroke-width: 1.2; filter: drop-shadow(0 4px 5px rgba(40,36,30,.05)); }
+    .node:hover rect { stroke-width: 2; }
+    .node.active rect { stroke: var(--text) !important; stroke-width: 3; filter: drop-shadow(0 7px 9px rgba(40,36,30,.16)); }
+    .node.exposed rect { stroke-width: 2.7; }
+    .node.prompt rect { fill: var(--prompt-fill); stroke: var(--prompt-stroke); }
+    .node.sampler rect { fill: var(--sampler-fill); stroke: var(--sampler-stroke); }
+    .node.image rect { fill: var(--image-fill); stroke: var(--image-stroke); }
+    .node.input rect { fill: var(--input-fill); stroke: var(--input-stroke); }
+    .node-title { fill: var(--text); font-size: 13px; font-weight: 800; pointer-events: none; }
+    .node-sub { fill: var(--muted); font-size: 10px; font-weight: 600; pointer-events: none; }
+    .node-id { fill: var(--faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; pointer-events: none; }
+    .node-badge { fill: var(--text); font-size: 10px; font-weight: 900; pointer-events: none; }
+    .port { fill: var(--panel); stroke: var(--line-strong); stroke-width: 1.2; }
+    .graph-hint { position: absolute; bottom: 16px; left: 18px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 10px; }
+    .graph-hint b { color: var(--text); font-weight: 700; }
+
+    .inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+    .inspector-head h2 { margin: 3px 0 0; font-size: 16px; line-height: 1.25; font-weight: 800; }
+    .inspector-head p { margin: 4px 0 0; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+    .node-state { display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .node-state .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .inspector-note { margin: 12px 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--soft); color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .inspector-note strong { color: var(--text); }
+    .field-list { display: grid; gap: 9px; }
+    .field-card { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); }
+    .field-card.exposed { border-color: var(--text); background: var(--selected); }
+    .field-top { display: grid; grid-template-columns: 21px minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+    .expose-toggle { display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel); color: transparent; font-size: 12px; font-weight: 900; }
+    .expose-toggle:hover { border-color: var(--text); }
+    .expose-toggle.on { border-color: var(--primary); background: var(--primary); color: var(--primary-text); }
+    .field-name { min-width: 0; }
+    .field-name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .field-name small { display: block; margin-top: 2px; color: var(--faint); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+    .type-pill { padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 9px; white-space: nowrap; }
+    .field-editor { display: none; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+    .field-card.exposed .field-editor { display: grid; }
+    .input-label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+    input, select, textarea { width: 100%; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--field); color: var(--text); }
+    input, select { height: 30px; padding: 0 8px; }
+    textarea { min-height: 58px; padding: 7px 8px; resize: vertical; line-height: 1.45; }
+    .editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 7px; }
+    .editor-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .required-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 1px; color: var(--muted); font-size: 10px; }
+    .switch { position: relative; width: 31px; height: 18px; padding: 0; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--field); }
+    .switch::after { position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--faint); content: ""; transition: transform .15s ease, background .15s ease; }
+    .switch.on { border-color: var(--primary); background: var(--primary); }
+    .switch.on::after { background: var(--primary-text); transform: translateX(13px); }
+    .readonly { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 8px; border: 1px dashed var(--line-strong); border-radius: 6px; color: var(--faint); font-size: 10px; line-height: 1.4; }
+    .inspector-footer { margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--line); }
+    .inspector-footer p { margin: 0 0 9px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .inspector-footer .plain-button { width: 100%; border-color: var(--line); }
+
+    .toast { position: fixed; right: 20px; bottom: 18px; z-index: 20; transform: translateY(8px); opacity: 0; pointer-events: none; padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); font-size: 11px; transition: .18s ease; }
+    .toast.visible { transform: translateY(0); opacity: 1; }
+
+    @media (max-width: 1120px) {
+      .editor { grid-template-columns: 245px minmax(0, 1fr) 300px; }
+      .app-header { gap: 13px; padding: 0 14px; }
+      .status { display: none; }
+    }
+    @media (max-width: 900px) {
+      html, body { overflow: auto; }
+      .app-header { position: sticky; top: 0; z-index: 4; }
+      .editor { display: grid; grid-template-columns: 1fr; height: auto; min-height: calc(100vh - 56px); }
+      .sidebar, .inspector { border: 0; }
+      .sidebar { order: 2; border-top: 1px solid var(--line); }
+      .graph-area { order: 1; height: 510px; }
+      .inspector { order: 3; border-top: 1px solid var(--line); }
+      .graph-wrap { min-height: 480px; }
+      .crumb { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark">⌃</span><span>无限画布</span></div>
+    <div class="crumb">我的画布 / <strong>猫狗谈人生</strong> / ComfyUI 工作流编辑器</div>
+    <div class="header-spacer"></div>
+    <div class="header-actions">
+      <span class="status"><span class="dot"></span>本地 ComfyUI 在线</span>
+      <button id="themeToggle" class="icon-button" type="button" title="切换主题" aria-label="切换主题">◐</button>
+      <button id="saveButton" class="primary-button" type="button">保存工作流</button>
+    </div>
+  </header>
+
+  <main class="editor">
+    <aside class="sidebar">
+      <div class="panel-heading">
+        <div>
+          <div class="eyebrow">工作流</div>
+          <h1>Z-Image 生图</h1>
+          <p>本地 ComfyUI · API JSON</p>
+        </div>
+        <button id="reloadButton" class="icon-button" type="button" title="重新解析">↻</button>
+      </div>
+
+      <div class="summary">
+        <div class="summary-card"><span>节点</span><strong id="nodeCount">6</strong><small>已解析</small></div>
+        <div class="summary-card"><span>参数</span><strong><span id="exposedCount">2</span><small>/ 8</small></strong><small>已暴露</small></div>
+        <div class="summary-card"><span>输出</span><strong>11</strong><small>SaveImage</small></div>
+        <div class="summary-card"><span>状态</span><strong style="font-size:13px;color:var(--success)">可用</strong><small>无校验错误</small></div>
+      </div>
+
+      <div class="section-title"><span>已暴露参数</span><span id="paramHint">点击节点输入添加</span></div>
+      <div id="parameterList" class="parameter-list"></div>
+
+      <div class="section-title"><span>图例</span><span>输入类别</span></div>
+      <div class="legend">
+        <div class="legend-row"><span class="legend-dot prompt"></span>文本编码 / 提示词</div>
+        <div class="legend-row"><span class="legend-dot input"></span>模型与潜空间输入</div>
+        <div class="legend-row"><span class="legend-dot sampler"></span>采样与处理</div>
+        <div class="legend-row"><span class="legend-dot image"></span>图片输出</div>
+      </div>
+    </aside>
+
+    <section class="graph-area">
+      <div class="graph-toolbar" aria-label="图形控制">
+        <button id="zoomOut" type="button" title="缩小">−</button>
+        <span id="zoomValue" class="zoom-value">100%</span>
+        <button id="zoomIn" type="button" title="放大">＋</button>
+        <button id="fitGraph" type="button" title="适应窗口">⌗</button>
+      </div>
+      <div id="graphWrap" class="graph-wrap">
+        <svg id="workflowGraph" viewBox="0 0 1100 610" role="img" aria-label="ComfyUI 工作流节点图">
+          <g id="viewport">
+            <g id="edges">
+              <path class="edge" data-edge="3-6" d="M 185 128 C 270 128, 270 211, 355 211"></path>
+              <path class="edge" data-edge="4-6" d="M 185 278 C 270 278, 270 230, 355 230"></path>
+              <path class="edge" data-edge="5-6" d="M 185 458 C 270 458, 270 249, 355 249"></path>
+              <path class="edge" data-edge="1-6" d="M 185 548 C 280 548, 280 268, 355 268"></path>
+              <path class="edge" data-edge="6-8" d="M 525 230 C 590 230, 590 230, 650 230"></path>
+              <path class="edge" data-edge="8-11" d="M 820 230 C 855 230, 855 230, 885 230"></path>
+            </g>
+            <g id="nodes">
+              <g class="node prompt exposed" data-node="3" transform="translate(36 90)">
+                <rect width="150" height="76" rx="9"></rect><circle class="port" cx="150" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">正面提示词</text><text class="node-sub" x="12" y="44">CLIPTextEncode</text><text class="node-id" x="12" y="61">节点 #3</text><text class="node-badge" x="132" y="61" text-anchor="end">1</text>
+              </g>
+              <g class="node prompt" data-node="4" transform="translate(36 240)">
+                <rect width="150" height="76" rx="9"></rect><circle class="port" cx="150" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">负面提示词</text><text class="node-sub" x="12" y="44">CLIPTextEncode</text><text class="node-id" x="12" y="61">节点 #4</text><text class="node-badge" x="132" y="61" text-anchor="end"></text>
+              </g>
+              <g class="node input" data-node="5" transform="translate(36 420)">
+                <rect width="150" height="76" rx="9"></rect><circle class="port" cx="150" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">画布尺寸</text><text class="node-sub" x="12" y="44">EmptyLatentImage</text><text class="node-id" x="12" y="61">节点 #5</text><text class="node-badge" x="132" y="61" text-anchor="end">1</text>
+              </g>
+              <g class="node input" data-node="1" transform="translate(36 510)">
+                <rect width="150" height="63" rx="9"></rect><circle class="port" cx="150" cy="31" r="4"></circle>
+                <text class="node-title" x="12" y="24">模型加载</text><text class="node-sub" x="12" y="43">CheckpointLoader</text><text class="node-id" x="12" y="56">节点 #1</text>
+              </g>
+              <g class="node sampler" data-node="6" transform="translate(355 192)">
+                <rect width="170" height="76" rx="9"></rect><circle class="port" cx="0" cy="38" r="4"></circle><circle class="port" cx="170" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">采样器</text><text class="node-sub" x="12" y="44">KSampler</text><text class="node-id" x="12" y="61">节点 #6</text>
+              </g>
+              <g class="node image" data-node="8" transform="translate(650 192)">
+                <rect width="170" height="76" rx="9"></rect><circle class="port" cx="0" cy="38" r="4"></circle><circle class="port" cx="170" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">解码图片</text><text class="node-sub" x="12" y="44">VAEDecode</text><text class="node-id" x="12" y="61">节点 #8</text>
+              </g>
+              <g class="node image exposed" data-node="11" transform="translate(885 192)">
+                <rect width="150" height="76" rx="9"></rect><circle class="port" cx="0" cy="38" r="4"></circle>
+                <text class="node-title" x="12" y="25">图片输出</text><text class="node-sub" x="12" y="44">SaveImage</text><text class="node-id" x="12" y="61">节点 #11</text><text class="node-badge" x="132" y="61" text-anchor="end">输出</text>
+              </g>
+            </g>
+          </g>
+        </svg>
+        <div class="graph-hint"><b>操作</b> 点击节点查看输入 · 滚轮缩放 · 拖动空白区域平移</div>
+      </div>
+    </section>
+
+    <aside class="inspector">
+      <div class="inspector-head">
+        <div>
+          <div class="eyebrow">节点输入</div>
+          <h2 id="inspectorTitle">正面提示词</h2>
+          <p id="inspectorSub">#3 · CLIPTextEncode</p>
+        </div>
+        <div class="node-state"><span class="dot"></span><span id="inspectorState">已暴露 1 项</span></div>
+      </div>
+      <div class="inspector-note"><strong>点击输入左侧方框</strong>，即可将它添加到工作流参数契约；参数 key 会用于画布连线绑定。</div>
+      <div id="fieldList" class="field-list"></div>
+      <div class="inspector-footer">
+        <p>节点内部由上游连接提供的输入只读。保存后，画布连接可选择这里定义的参数名。</p>
+        <button id="viewJson" class="plain-button" type="button">查看参数映射 JSON</button>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    const nodes = {
+      3: { title: "正面提示词", classType: "CLIPTextEncode", fields: [
+        { key: "text", label: "文本", type: "多行文本", exposed: true, parameterKey: "prompt", parameterLabel: "正面提示词", value: "一只坐在窗边的橘猫，午后阳光，电影感，高细节", required: true }
+      ] },
+      4: { title: "负面提示词", classType: "CLIPTextEncode", fields: [
+        { key: "text", label: "文本", type: "多行文本", exposed: false, parameterKey: "negativePrompt", parameterLabel: "负面提示词", value: "模糊，低清晰度，畸形，多余的手指", required: false }
+      ] },
+      5: { title: "画布尺寸", classType: "EmptyLatentImage", fields: [
+        { key: "width", label: "宽度", type: "数字", exposed: true, parameterKey: "width", parameterLabel: "宽度", value: "1024", required: true, min: 256, max: 2048, step: 64 },
+        { key: "height", label: "高度", type: "数字", exposed: false, parameterKey: "height", parameterLabel: "高度", value: "1024", required: true, min: 256, max: 2048, step: 64 },
+        { key: "batch_size", label: "批量数量", type: "数字", exposed: false, parameterKey: "batchSize", parameterLabel: "批量数量", value: "1", required: false, min: 1, max: 4, step: 1 }
+      ] },
+      1: { title: "模型加载", classType: "CheckpointLoaderSimple", fields: [
+        { key: "ckpt_name", label: "模型文件", type: "枚举", exposed: false, parameterKey: "checkpoint", parameterLabel: "模型文件", value: "z-image-turbo.safetensors", required: true, options: "z-image-turbo.safetensors\nflux1-dev.safetensors" }
+      ] },
+      6: { title: "采样器", classType: "KSampler", fields: [
+        { key: "steps", label: "采样步数", type: "数字", exposed: false, parameterKey: "steps", parameterLabel: "采样步数", value: "28", required: true, min: 1, max: 80, step: 1 },
+        { key: "cfg", label: "CFG", type: "数字", exposed: false, parameterKey: "cfg", parameterLabel: "CFG", value: "3.5", required: false, min: 0, max: 20, step: .5 },
+        { key: "sampler_name", label: "采样器", type: "枚举", exposed: false, parameterKey: "sampler", parameterLabel: "采样器", value: "euler", required: false, options: "euler\neuler_cfg1\nheun" },
+        { key: "seed", label: "Seed", type: "数字", exposed: false, parameterKey: "seed", parameterLabel: "Seed", value: "随机", required: false }
+      ] },
+      8: { title: "解码图片", classType: "VAEDecode", fields: [
+        { key: "samples", label: "Latent", type: "上游连接", exposed: false, readonly: true, reason: "由节点 #6 的 samples 输出提供" }
+      ] },
+      11: { title: "图片输出", classType: "SaveImage", fields: [
+        { key: "images", label: "图片", type: "上游连接", exposed: false, readonly: true, reason: "由节点 #8 的 image 输出提供" },
+        { key: "filename_prefix", label: "文件名前缀", type: "单行文本", exposed: false, parameterKey: "filenamePrefix", parameterLabel: "文件名前缀", value: "ComfyUI", required: false }
+      ] }
+    };
+
+    let activeNode = "3";
+    let scale = 1;
+    let offset = { x: 0, y: 0 };
+    let panState = null;
+    let lastPanMoved = false;
+    let toastTimer;
+
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("visible"), 2200);
+    }
+
+    function exposedFields() {
+      return Object.values(nodes).flatMap(node => node.fields.filter(field => field.exposed));
+    }
+
+    function renderParameterList() {
+      const list = $("#parameterList");
+      const fields = exposedFields();
+      $("#exposedCount").textContent = fields.length;
+      $$(".node").forEach(node => {
+        const count = nodes[node.dataset.node].fields.filter(field => field.exposed).length;
+        const badge = $(".node-badge", node);
+        if (badge && node.dataset.node !== "11") badge.textContent = count ? count : "";
+        node.classList.toggle("exposed", count > 0);
+      });
+      if (!fields.length) {
+        list.innerHTML = '<div class="empty-parameters">还没有暴露参数<br>点击右侧输入行的方框开始配置</div>';
+        return;
+      }
+      list.innerHTML = fields.map(field => {
+        const owner = Object.entries(nodes).find(([, node]) => node.fields.includes(field));
+        return `<div class="parameter-row" data-node="${owner?.[0] || ""}">
+          <div class="parameter-icon">↳</div>
+          <div class="parameter-copy"><strong>${field.parameterLabel}</strong><small>${field.parameterKey}</small></div>
+          <div class="parameter-meta"><span class="bound">已绑定</span><br>#${owner?.[0] || "-"}</div>
+        </div>`;
+      }).join("");
+      $$(".parameter-row", list).forEach(row => row.addEventListener("click", () => selectNode(row.dataset.node)));
+    }
+
+    function renderInspector() {
+      const node = nodes[activeNode];
+      $("#inspectorTitle").textContent = node.title;
+      $("#inspectorSub").textContent = `#${activeNode} · ${node.classType}`;
+      const count = node.fields.filter(field => field.exposed).length;
+      $("#inspectorState").textContent = count ? `已暴露 ${count} 项` : "未暴露参数";
+      $("#fieldList").innerHTML = node.fields.map((field, index) => renderField(field, index)).join("");
+      bindInspectorEvents();
+    }
+
+    function renderField(field, index) {
+      if (field.readonly) return `<div class="field-card"><div class="field-top"><button class="expose-toggle" type="button" disabled>·</button><div class="field-name"><strong>${field.label}</strong><small>${field.key}</small></div><span class="type-pill">${field.type}</span></div><div class="readonly">锁定 · ${field.reason}</div></div>`;
+      const options = field.options ? `<label class="input-label">枚举选项<textarea data-action="options">${field.options}</textarea></label>` : "";
+      const numeric = field.type === "数字" ? `<div class="editor-grid three"><label class="input-label">最小值<input data-action="min" type="number" value="${field.min ?? ""}"></label><label class="input-label">最大值<input data-action="max" type="number" value="${field.max ?? ""}"></label><label class="input-label">步长<input data-action="step" type="number" value="${field.step ?? ""}"></label></div>` : "";
+      return `<div class="field-card ${field.exposed ? "exposed" : ""}" data-field-index="${index}">
+        <div class="field-top"><button class="expose-toggle ${field.exposed ? "on" : ""}" data-action="toggle" type="button" title="${field.exposed ? "取消暴露" : "添加为工作流参数"}">${field.exposed ? "✓" : "＋"}</button><div class="field-name"><strong>${field.label}</strong><small>${field.key} · ${field.type}</small></div><span class="type-pill">${field.exposed ? field.parameterKey : "未暴露"}</span></div>
+        <div class="field-editor">
+          <div class="editor-grid"><label class="input-label">参数 key<input data-action="key" value="${field.parameterKey || ""}"></label><label class="input-label">类型<select data-action="type"><option ${field.type === "多行文本" ? "selected" : ""}>多行文本</option><option ${field.type === "单行文本" ? "selected" : ""}>单行文本</option><option ${field.type === "数字" ? "selected" : ""}>数字</option><option ${field.type === "枚举" ? "selected" : ""}>枚举</option><option ${field.type === "开关" ? "selected" : ""}>开关</option></select></label></div>
+          <label class="input-label">显示名称<input data-action="label" value="${field.parameterLabel || field.label}"></label>
+          <label class="input-label">默认值${field.type === "多行文本" ? `<textarea data-action="value">${field.value || ""}</textarea>` : `<input data-action="value" value="${field.value || ""}">`}</label>
+          ${options}${numeric}
+          <div class="required-row"><span>必填参数</span><button class="switch ${field.required ? "on" : ""}" data-action="required" type="button" aria-label="切换必填"></button></div>
+        </div>
+      </div>`;
+    }
+
+    function bindInspectorEvents() {
+      $$("#fieldList [data-action]").forEach(control => {
+        const card = control.closest(".field-card");
+        const field = nodes[activeNode].fields[Number(card.dataset.fieldIndex)];
+        const action = control.dataset.action;
+        if (action === "toggle") control.addEventListener("click", () => { field.exposed = !field.exposed; renderParameterList(); renderInspector(); showToast(field.exposed ? `已添加参数 ${field.parameterKey}` : "已取消暴露参数"); });
+        else if (action === "required") control.addEventListener("click", () => { field.required = !field.required; control.classList.toggle("on", field.required); });
+        else control.addEventListener("input", () => { if (action === "label") field.parameterLabel = control.value; else if (action === "key") field.parameterKey = control.value.trim(); else if (action === "value") field.value = control.value; else if (action === "options") field.options = control.value; else field[action] = control.value === "" ? "" : Number(control.value); renderParameterList(); });
+        if (action === "type") control.addEventListener("change", () => { field.type = control.value; renderInspector(); });
+      });
+    }
+
+    function selectNode(nodeId) {
+      if (!nodes[nodeId]) return;
+      activeNode = String(nodeId);
+      $$(".node").forEach(node => node.classList.toggle("active", node.dataset.node === activeNode));
+      $$(".edge").forEach(edge => edge.classList.toggle("active", edge.dataset.edge.split("-").includes(activeNode)));
+      renderInspector();
+    }
+
+    function applyTransform() {
+      $("#viewport").setAttribute("transform", `translate(${offset.x} ${offset.y}) scale(${scale})`);
+      $("#zoomValue").textContent = `${Math.round(scale * 100)}%`;
+    }
+
+    function zoomAt(nextScale, centerX, centerY) {
+      const graph = $("#workflowGraph").getBoundingClientRect();
+      const x = ((centerX ?? graph.width / 2) / graph.width) * 1100;
+      const y = ((centerY ?? graph.height / 2) / graph.height) * 610;
+      const factor = nextScale / scale;
+      offset.x = x - (x - offset.x) * factor;
+      offset.y = y - (y - offset.y) * factor;
+      scale = Math.max(.55, Math.min(1.8, nextScale));
+      applyTransform();
+    }
+
+    function fitGraph() { scale = 1; offset = { x: 0, y: 0 }; applyTransform(); showToast("已适应窗口"); }
+
+    $$(".node").forEach(node => node.addEventListener("click", event => { if (!lastPanMoved) { event.stopPropagation(); selectNode(node.dataset.node); } lastPanMoved = false; }));
+    $("#zoomIn").addEventListener("click", () => zoomAt(scale * 1.16));
+    $("#zoomOut").addEventListener("click", () => zoomAt(scale / 1.16));
+    $("#fitGraph").addEventListener("click", fitGraph);
+    $("#graphWrap").addEventListener("wheel", event => { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); zoomAt(scale * (event.deltaY < 0 ? 1.12 : .89), event.clientX - rect.left, event.clientY - rect.top); }, { passive: false });
+    $("#workflowGraph").addEventListener("pointerdown", event => { panState = { x: event.clientX, y: event.clientY, ox: offset.x, oy: offset.y, moved: false }; $("#graphWrap").classList.add("panning"); $("#workflowGraph").setPointerCapture(event.pointerId); });
+    $("#workflowGraph").addEventListener("pointermove", event => { if (!panState) return; const dx = event.clientX - panState.x; const dy = event.clientY - panState.y; if (Math.abs(dx) + Math.abs(dy) > 4) panState.moved = true; offset.x = panState.ox + dx; offset.y = panState.oy + dy; applyTransform(); });
+    $("#workflowGraph").addEventListener("pointerup", () => { lastPanMoved = Boolean(panState?.moved); panState = null; $("#graphWrap").classList.remove("panning"); });
+    $("#themeToggle").addEventListener("click", () => { const root = document.documentElement; root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark"; });
+    $("#saveButton").addEventListener("click", () => showToast("工作流参数配置已保存"));
+    $("#reloadButton").addEventListener("click", () => showToast("已重新解析 6 个节点"));
+    $("#viewJson").addEventListener("click", () => showToast("已生成参数映射预览"));
+
+    renderParameterList();
+    selectNode(activeNode);
+    applyTransform();
+  </script>
+</body>
+</html>
